@@ -47,7 +47,7 @@ def astar_initial_path(
     obstacles,
     inflation_radius,
     resolution=0.1,
-    extra_clearance=0.1,
+    extra_clearance=0.01,
 ):
     """
     Run 8-connected A* on a 2-D grid to generate a geometric
