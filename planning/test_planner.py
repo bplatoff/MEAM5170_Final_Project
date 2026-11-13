@@ -170,9 +170,9 @@ def main():
         "smoothness_weight": args.smoothness_weight,
         "robot_length": 0.7,
         "robot_width": 0.31,
-        "r_safety": 0.1,
+        "r_safety": 0.05,
         "astar_resolution": 0.1,
-        "astar_clearance": 0.1
+        "astar_clearance": 0.01
     }
 
     print(f"Scenario: {environment.name}")
