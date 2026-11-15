@@ -1,8 +1,8 @@
 """Generate the course from the parameter sheet (v0.3) as a MuJoCo scene for gym-quadruped / Quadruped-PyMPC.
 
-Usage:
-    python terrain_gen.py courses/debug_v03.yaml              # fixed class values (0.20 / 0.50 / 0.80)
-    python terrain_gen.py courses/debug_v03.yaml --seed 7     # values drawn within each class range, seed 7
+Usage (from the repo root):
+    python -m trackC.terrain_gen trackC/courses/debug_v03.yaml            # fixed class values (0.20 / 0.50 / 0.80)
+    python -m trackC.terrain_gen trackC/courses/debug_v03.yaml --seed 7    # values drawn within each class range, seed 7
 Then set Quadruped-PyMPC  simulation_params['scene'] = '<scene name printed by this script>'.
 
 Pipeline (each step is one function below):
@@ -31,7 +31,7 @@ from shapely import constrained_delaunay_triangles
 from shapely.geometry import Polygon, box
 from shapely.ops import unary_union
 
-from course import Course
+from trackC.course import Course
 
 TILE_DEPTH = 0.05   # [m] tiles are prisms extruded this far below the surface
 

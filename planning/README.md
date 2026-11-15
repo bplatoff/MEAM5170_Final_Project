@@ -27,7 +27,7 @@ Only `direct_collocation.py` and `planner_helpers.py` are required by the planne
 The main entry point is:
 
 ```python
-from direct_collocation import plan_trajectory
+from planning.direct_collocation import plan_trajectory
 
 result = plan_trajectory(
     start_state=start_state,
@@ -256,12 +256,12 @@ The integration code should check `success` before using the returned reference.
 
 ## Running the Standalone Tests
 
-From the `planning/` directory:
+From the repository root, inside the project environment (see `SETUP.md`):
 
 ```bash
-python3 test_planner.py --scenario empty
-python3 test_planner.py --scenario single
-python3 test_planner.py --scenario multi
+python -m planning.test_planner --scenario empty
+python -m planning.test_planner --scenario single
+python -m planning.test_planner --scenario multi
 ```
 
 Useful options include:
@@ -278,7 +278,7 @@ Useful options include:
 Example:
 
 ```bash
-python3 test_planner.py --scenario multi --mu 0.5
+python -m planning.test_planner --scenario multi --mu 0.5
 ```
 
 The tester checks solver success, trajectory dimensions, start/goal states, nominal friction acceleration limits, course bounds, and collisions for the current rectangular test obstacles. It also plots the CoM path, velocity, and acceleration.

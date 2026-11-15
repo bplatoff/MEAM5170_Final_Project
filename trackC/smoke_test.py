@@ -12,7 +12,7 @@ Each test prints what the logger measured next to what physics says it should be
   3. ramp snow, pushed downhill -> sliding force ratio r ~ mu of the snow (0.30)
   4. next to a wall, pushed     -> the logger records a wall collision
 
-Usage: python smoke_test.py courses/debug_v03.yaml
+Usage (from the repo root): python -m trackC.smoke_test trackC/courses/debug_v03.yaml
 """
 import math
 import sys
@@ -21,8 +21,8 @@ import numpy as np
 import yaml
 from gym_quadruped.quadruped_env import QuadrupedEnv
 
-from contact_logger import ContactLogger
-from terrain_gen import build, install
+from trackC.contact_logger import ContactLogger
+from trackC.terrain_gen import build, install
 
 
 def run(env, course, x, y, push=(0, 0, 0), t_push=(0.8, 1.8), T=2.4):

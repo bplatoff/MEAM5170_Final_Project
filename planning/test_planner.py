@@ -4,7 +4,7 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
-from mock_environment import (
+from planning.mock_environment import (
     make_empty_environment,
     make_single_obstacle_environment,
     make_route_choice_environment,
@@ -15,11 +15,11 @@ from mock_environment import (
 def planner_adapter(start_state, goal_state, environment, config):
     """Edit only this function if your planner uses a different interface."""
     try:
-        from direct_collocation import plan_trajectory
+        from planning.direct_collocation import plan_trajectory
     except ImportError as exc:
         raise ImportError(
-            "Could not import collocation_planner.py. "
-            "Put it in the same folder as this tester."
+            "Could not import planning.direct_collocation. "
+            "Run from the repo root: python -m planning.test_planner"
         ) from exc
 
     return plan_trajectory(

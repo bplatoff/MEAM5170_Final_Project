@@ -1,7 +1,7 @@
 """Draw a course: plan view (regions, the triangles they were split into, walls, obstacles, start, goal) and a side
 profile. Use it to check a layout before simulating, and to see exactly how the generator cut the regions up.
 
-Usage: python visualize_course.py courses/debug_v03.yaml [--seed N] [--out course.png]
+Usage (from the repo root): python -m trackC.visualize_course trackC/courses/debug_v03.yaml [--seed N] [--out course.png]
 """
 import argparse
 import math
@@ -14,7 +14,7 @@ from matplotlib.colors import Normalize
 from matplotlib.patches import Polygon as MplPolygon
 from matplotlib.patches import Rectangle
 
-from terrain_gen import build, triangulate
+from trackC.terrain_gen import build, triangulate
 
 ap = argparse.ArgumentParser()
 ap.add_argument("config")

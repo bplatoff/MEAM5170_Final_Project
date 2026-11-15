@@ -20,11 +20,14 @@ Extra dependency over Quadruped-PyMPC: `pip install "shapely>=2.1" pyyaml matplo
 
 ## Run order
 
+Run from the repository root, inside the project environment (see `SETUP.md`). Imports are package style
+(`from trackC.terrain_gen import build`).
+
 ```bash
-python visualize_course.py courses/debug_v03.yaml          # look at the course first
-python terrain_gen.py courses/debug_v03.yaml               # install scene_debug_v03.xml into gym_quadruped
-python friction_check.py courses/debug_v03.yaml            # every surface should measure its set value
-python smoke_test.py courses/debug_v03.yaml                # logger physics checks
+python -m trackC.visualize_course trackC/courses/debug_v03.yaml   # look at the course first
+python -m trackC.terrain_gen trackC/courses/debug_v03.yaml        # install scene_debug_v03.xml into gym_quadruped
+python -m trackC.friction_check trackC/courses/debug_v03.yaml     # every surface should measure its set value
+python -m trackC.smoke_test trackC/courses/debug_v03.yaml         # logger physics checks
 ```
 
 Seeded friction values: add `--seed N` to `terrain_gen.py`, `friction_check.py` or `visualize_course.py`. The

@@ -11,7 +11,7 @@ A block is used instead of a foot-sized sphere because a sphere rolls, which hid
 MuJoCo depends only on the two geoms' friction and priority, so the result applies to the feet. If priorities were
 wrong, every surface would measure 0.6 (the block's own friction) instead of its set value.
 
-Usage: python friction_check.py courses/debug_v03.yaml [--seed N]
+Usage (from the repo root): python -m trackC.friction_check trackC/courses/debug_v03.yaml [--seed N]
 """
 import argparse
 import math
@@ -20,7 +20,7 @@ import mujoco
 import numpy as np
 import yaml
 
-from terrain_gen import build
+from trackC.terrain_gen import build
 
 S, M, G = 0.02, 1.0, 9.81      # probe half-size [m], mass [kg], gravity
 
