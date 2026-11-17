@@ -56,7 +56,7 @@ def friction_acceleration_bound(
     except ValueError:
         raise ValueError("mu_plan must have compatible shape with stance mask")
 
-    
+
     delta_a = (1/mass)*np.sum((np.maximum(0, mu_plan - mu_lo)*normal_forces*stance_mask), axis = 1)
 
 
@@ -96,7 +96,7 @@ def p_norm_disturbance_bound(delta_a, B, P, r0 = 0.0):
     lambda_max = max(np.linalg.eigvalsh(B.T@P@B))
 
     r_w = np.sqrt(lambda_max)*delta_a + r0
-   
+
 
     return r_w
 
@@ -160,4 +160,3 @@ def compute_friction_tube(
     alpha = propagate_tube(r_w, rho, alpha_0)
 
     return alpha
-

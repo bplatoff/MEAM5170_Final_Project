@@ -212,7 +212,7 @@ class TestFrictionTube(unittest.TestCase):
             alpha[3], self.rho * alpha[2]
         )
 
-    
+
     def test_residual_disturbance(self):
         """Residual uncertainty is added to the P-norm bound."""
         delta_a = np.array([0.0, 1.0, 2.0])
@@ -242,7 +242,7 @@ class TestFrictionTube(unittest.TestCase):
                 delta_a, self.B, self.P, r0=-0.1
             )
 
-    
+
     def test_invalid_mass(self):
         """Mass must be finite and strictly positive."""
         stance = np.ones((2, 4))
@@ -371,7 +371,7 @@ class TestFrictionTube(unittest.TestCase):
                         r0=r0,
                     )
 
-    
+
     def test_invalid_tube_disturbances(self):
         """Tube disturbances must be 1D, finite, and nonnegative."""
         cases = [
