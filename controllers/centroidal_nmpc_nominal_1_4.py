@@ -5,11 +5,15 @@ Subclasses the upstream nominal NMPC (Quadruped-PyMPC pinned at 025eab4) without
 What changes compared to upstream:
   * Parameter vector: two blocks are appended AFTER the upstream 29 entries, so every fixed index the upstream
     dynamics read (param[5], param[13:16], param[19:28], param[28]) stays valid:
-        mu_feet  (4)            friction of FL, FR, RL, RR
-        walls    (3 * K_WALLS)  K half-spaces [a_x, a_y, b] meaning  a_x * x + a_y * y <= b  on the CoM
+        mu_feet     (4)            friction of FL, FR, RL, RR
+        slope_feet  (8)            terrain slope (dz/dx, dz/dy) under FL, FR, RL, RR, flattened [sx_FL, sy_FL, ...]
+        walls       (3 * K_WALLS)  K half-spaces [a_x, a_y, b] meaning  a_x * x + a_y * y <= b  on the CoM
     The upstream scalar mu (param[4]) is still filled but no longer used by the friction cone.
   * Friction cone: rows 0-4 use mu_feet[0] (FL), 5-9 mu_feet[1] (FR), 10-14 mu_feet[2] (RL), 15-19 mu_feet[3] (RR).
     Parameters are per shooting stage, so mu can change along the horizon.
+  * Slopes: each foot's pyramid is built in the surface frame (n, t, b) of the terrain under it (surface_frame()),
+    not in the world axes, so it is correct on a ramp tilted in x, y or both. Zero slope gives back the world axes,
+    i.e. upstream's cone exactly. The GRFs are world-frame, so the frame does not depend on the robot's yaw.
   * Walls: K extra rows a^T p_xy - b <= 0 on stages 1..N-1 (stage 0 is the fixed measured state). They are soft
     with a large exact penalty, so an unreachable wall degrades the solution instead of failing the solve.
     An unused slot is a = 0, b = INACTIVE_B, which is always satisfied.
@@ -24,6 +28,7 @@ Use:
     mpc = PerFootFrictionWallNMPC()
     wrapper.srbd_controller_interface.controller = mpc
     mpc.set_friction([0.5, 0.5, 0.2, 0.5])            # or shape (N, 4) for per-timestep values
+    mpc.set_slope([[0.176, 0.0]] * 4)                 # all feet on a 10 deg ramp rising in +x, or shape (N, 4, 2)
     mpc.set_walls([[0.0, 1.0, 1.2]])                  # y <= 1.2 (world), or shape (N, k, 3)
     # stage 2.4 will pass b_j - r_robot - alpha_t * ||a_j|| per stage through the same set_walls()
 """
@@ -47,17 +52,31 @@ MODEL_NAME = "centroidal_model_pf"  # differs from upstream's so the two generat
 CODE_EXPORT_DIR = pathlib.Path(__file__).parent / "c_generated_code_per_foot"  # ignored by git (c_generated_code*/)
 
 
+def surface_frame(sx, sy):
+    """Unit normal n and tangents t, b (3x1 each) of a surface with slope sx = dz/dx, sy = dz/dy.
+
+    n = (1, 0, sx) x (0, 1, sy), normalized: perpendicular to the two directions that lie in the surface; it points
+    up, out of the ground. t is world x projected onto the surface, b = n x t. Zero slope gives the world axes.
+    Works on numbers (returns casadi DM) and on casadi symbols (used inside the OCP).
+    """
+    n = cs.vertcat(-sx, -sy, 1) / cs.sqrt(1 + sx**2 + sy**2)
+    t = cs.vertcat(1, 0, sx) / cs.sqrt(1 + sx**2)
+    b = cs.cross(n, t)
+    return n, t, b
+
+
 class PerFootModel(Centroidal_Model_Nominal):
-    """Upstream centroidal model with mu_feet and walls appended to the parameter vector."""
+    """Upstream centroidal model with mu_feet, slope_feet and walls appended to the parameter vector."""
 
     def __init__(self) -> None:
         super().__init__()
         self.mu_feet = cs.SX.sym("mu_feet", 4, 1)
+        self.slope_feet = cs.SX.sym("slope_feet", 8, 1)
         self.walls = cs.SX.sym("walls", 3 * K_WALLS, 1)
 
     def export_robot_model(self):
         acados_model = super().export_robot_model()  # builds self.param (upstream 29) and the dynamics
-        self.param = cs.vertcat(self.param, self.mu_feet, self.walls)
+        self.param = cs.vertcat(self.param, self.mu_feet, self.slope_feet, self.walls)  # order = _extra_params
         acados_model.p = self.param
         acados_model.name = MODEL_NAME
         return acados_model
@@ -99,6 +118,7 @@ class PerFootFrictionWallNMPC(Acados_NMPC_Nominal):
 
         # Our per-stage values. None means "use config.mpc_params['mu'] on every foot", read at every solve
         self._mu_feet = None                      # (N, 4) or None
+        self._slope_feet = None                   # (N, 4, 2) or None (flat under every foot)
         self._walls = self._inactive_walls()      # (N, K_WALLS, 3), world frame
 
         self.horizon = config.mpc_params['horizon']
@@ -157,24 +177,28 @@ class PerFootFrictionWallNMPC(Acados_NMPC_Nominal):
 
     # ------------------------------------------------------------------ OCP changes
     def create_friction_cone_constraints(self):
-        """Upstream friction pyramid, with each leg's 5 rows using that leg's own mu (a parameter per stage)."""
-        n = np.array([0, 0, 1])
-        t = np.array([1, 0, 0])
-        b = np.array([0, 1, 0])
+        """Upstream friction pyramid, with each leg's 5 rows using that leg's own mu and the surface frame of the
+        terrain under that foot (both parameters per stage).
+
+        Upstream fixes n = (0, 0, 1), t = (1, 0, 0), b = (0, 1, 0) (world axes), which is only right on flat ground.
+        Here n, t, b come from surface_frame(sx, sy); with sx = sy = 0 they are those same world axes.
+        """
         mu_feet = self.centroidal_model.mu_feet
+        slope_feet = self.centroidal_model.slope_feet
         f_max = config.mpc_params["grf_max"]
         f_min = config.mpc_params["grf_min"]
 
         # Focchi et al., "High-slope terrain locomotion for torque-controlled quadruped robots"
-        Jbu = cs.SX.zeros(20, 12)
+        Jbu = cs.SX.zeros(20, 12)  # row = one inequality, 3 columns per foot = that foot's (fx, fy, fz)
         for leg in range(4):  # FL, FR, RL, RR
             r, c = 5 * leg, 3 * leg
             mu = mu_feet[leg]
-            Jbu[r + 0, c:c + 3] = -n * mu + t
-            Jbu[r + 1, c:c + 3] = -n * mu + b
-            Jbu[r + 2, c:c + 3] = n * mu + b
-            Jbu[r + 3, c:c + 3] = n * mu + t
-            Jbu[r + 4, c:c + 3] = n
+            n, t, b = surface_frame(slope_feet[2 * leg], slope_feet[2 * leg + 1])  # 3x1 columns, hence the .T
+            Jbu[r + 0, c:c + 3] = (-n * mu + t).T  # (t - mu n) . f <= 0  ->  f_t <= mu f_n   (+t face; uphill on a +x ramp)
+            Jbu[r + 1, c:c + 3] = (-n * mu + b).T  # f_b <= mu f_n                               (mu f_n = max friction force)
+            Jbu[r + 2, c:c + 3] = (n * mu + b).T   # f_b >= -mu f_n
+            Jbu[r + 3, c:c + 3] = (n * mu + t).T   # f_t >= -mu f_n
+            Jbu[r + 4, c:c + 3] = n.T              # f_min <= f_n <= f_max (normal force, = f_z on flat ground)
 
         Jbu = Jbu @ cs.vertcat(self.centroidal_model.inputs[12:24])
 
@@ -215,6 +239,7 @@ class PerFootFrictionWallNMPC(Acados_NMPC_Nominal):
         ocp.parameter_values = np.concatenate((
             ocp.parameter_values,
             config.mpc_params["mu"] * np.ones(4),
+            np.zeros(8),                            # flat ground under every foot
             self._inactive_walls()[0].ravel(),
         ))
         return ocp
@@ -239,6 +264,24 @@ class PerFootFrictionWallNMPC(Acados_NMPC_Nominal):
         if np.any(mu <= 0):
             raise ValueError("friction must be positive")
         self._mu_feet = mu
+
+    def set_slope(self, slope):
+        """Terrain slope (dz/dx, dz/dy) under FL, FR, RL, RR, used from the next solve on.
+
+        slope: shape (4, 2) (same on every stage) or (N, 4, 2) (stage j of the horizon). A 10 deg ramp rising in
+        +x is (tan 10deg, 0) = (0.176, 0); downhill slopes are negative. None goes back to flat ground everywhere.
+        """
+        if slope is None:
+            self._slope_feet = None
+            return
+        slope = np.asarray(slope, dtype=float)
+        if slope.shape == (4, 2):
+            slope = np.tile(slope, (self.horizon, 1, 1))
+        if slope.shape != (self.horizon, 4, 2):
+            raise ValueError(f"slope must have shape (4, 2) or ({self.horizon}, 4, 2), got {slope.shape}")
+        if not np.all(np.isfinite(slope)):
+            raise ValueError("slope must be finite")
+        self._slope_feet = slope
 
     def set_walls(self, walls):
         """CoM half-spaces a_x * x + a_y * y <= b in the WORLD frame, used from the next solve on.
@@ -276,12 +319,13 @@ class PerFootFrictionWallNMPC(Acados_NMPC_Nominal):
         return walls
 
     def _extra_params(self, stage):
-        """mu_feet and walls (shifted to the solver's CoM-centered frame) for one stage."""
+        """mu_feet, slope_feet and walls (shifted to the solver's CoM-centered frame) for one stage."""
         j = min(stage, self.horizon - 1)
         mu = np.full(4, float(config.mpc_params["mu"])) if self._mu_feet is None else self._mu_feet[j]
+        slope = np.zeros(8) if self._slope_feet is None else self._slope_feet[j].ravel()  # [sx_FL, sy_FL, sx_FR, ...]
 
         # perform_scaling already ran for this solve, so initial_base_position is the CoM the solver subtracted
         walls = copy.deepcopy(self._walls[j])
         p0 = np.asarray(self.initial_base_position, dtype=float)[0:2]
         walls[:, 2] -= walls[:, 0:2] @ p0
-        return np.concatenate((mu, walls.ravel()))
+        return np.concatenate((mu, slope, walls.ravel()))

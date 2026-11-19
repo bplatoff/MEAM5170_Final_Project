@@ -179,12 +179,29 @@ def make_waypoints(kind: str, start, goal, amplitude: float = 1.0, n_legs: int =
     raise ValueError(f"unknown path kind: {kind}")
 
 
+def foot_slopes(course: Course, feet_pos) -> np.ndarray:
+    """Terrain slope (dz/dx, dz/dy) under FL, FR, RL, RR, shape (4, 2), for the perfoot MPC's friction cone.
+
+    Our courses only tilt along x: the ramp section has dz/dx = tan(theta), the flats 0, and dz/dy = 0 everywhere.
+    Uses each foot's current position for the whole horizon (0.24 s, so a foot rarely crosses a crease within it).
+    """
+    out = np.zeros((4, 2))
+    for i, leg in enumerate(LEGS_ORDER):
+        x = float(np.clip(feet_pos[leg][0], course.x0, course.x3))
+        if course.section_at(x).name == "ramp":
+            out[i, 0] = np.tan(course.theta)
+    return out
+
+
 # ---------------------------------------------------------------- simulation
 def run(course_path: str, path_kind: str = "straight", v_ref: float = 0.4, timeout: float = 60.0,
         render: bool = True, log_dir: str = "data/run_waypoints", plot: bool = False,
-        mpc_kind: str = "upstream", walls=None, mu_feet=None, seed=None, tag: str | None = None) -> dict:
+        mpc_kind: str = "upstream", walls=None, mu_feet=None, seed=None, tag: str | None = None,
+        slope_cone: bool = True) -> dict:
     """mpc_kind 'perfoot' uses controllers.centroidal_nmpc_nominal_1_4 (step 1.4); walls are CoM half-spaces
     [a_x, a_y, b] (a_x x + a_y y <= b, world frame) and mu_feet the friction of FL, FR, RL, RR.
+    slope_cone (perfoot only): build each foot's friction cone on the terrain slope under it; False keeps the
+    world-vertical cone (the behavior before the slope fix), for comparison.
     seed: jitter the spawn pose (see spawn_with_jitter). tag: log file name stem (default scene_path_timestamp).
     Returns the summary dict, with 'log' set to the path of the saved .npz."""
     course_cfg = yaml.safe_load(open(course_path))
@@ -249,16 +266,19 @@ def run(course_path: str, path_kind: str = "straight", v_ref: float = 0.4, timeo
     )
 
     # Step 1.4: swap in the MPC with per-foot friction and CoM walls (SETUP.md: swap after the wrapper is built)
+    slope_mpc = None                # the MPC to give per-foot terrain slopes every step, if any
     if mpc_kind == "perfoot":
         from controllers.centroidal_nmpc_nominal_1_4 import PerFootFrictionWallNMPC
         mpc = PerFootFrictionWallNMPC()
         mpc.set_friction(mu_feet)   # None: config.mpc_params['mu'] on every foot
         mpc.set_walls(walls)        # None: no walls
         wrapper.srbd_controller_interface.controller = mpc
+        slope_mpc = mpc if slope_cone else None
         print(f"MPC: per-foot friction {mu_feet if mu_feet is not None else cfg.mpc_params['mu']}, "
-              f"CoM walls (a_x, a_y, b) {walls if walls else 'none'}")
-    elif walls or mu_feet is not None:
-        raise ValueError("--wall and --mu need --mpc perfoot")
+              f"CoM walls (a_x, a_y, b) {walls if walls else 'none'}, "
+              f"friction cone {'on the terrain slope' if slope_cone else 'world-vertical (--flat-cone)'}")
+    elif walls or mu_feet is not None or not slope_cone:
+        raise ValueError("--wall, --mu and --flat-cone need --mpc perfoot")
 
     solves = SolveRecorder(wrapper.srbd_controller_interface.controller, env)
     contact_logger = ContactLogger(env)
@@ -319,6 +339,9 @@ def run(course_path: str, path_kind: str = "straight", v_ref: float = 0.4, timeo
         legs_qvel_idx = env.legs_qvel_idx
         legs_qpos_idx = env.legs_qpos_idx
         joints_pos = LegsAttr(FL=legs_qvel_idx.FL, FR=legs_qvel_idx.FR, RL=legs_qvel_idx.RL, RR=legs_qvel_idx.RR)
+
+        if slope_mpc is not None:   # stored only; the MPC reads it at its next solve
+            slope_mpc.set_slope(foot_slopes(course, feet_pos))
 
         tau = wrapper.compute_actions(
             com_pos, base_pos, base_lin_vel, base_ori_euler_xyz, base_ang_vel,
@@ -471,10 +494,13 @@ if __name__ == "__main__":
                     help="CoM wall AX*x + AY*y <= B (world frame); repeat for more (needs --mpc perfoot)")
     ap.add_argument("--mu", nargs=4, type=float, metavar=("FL", "FR", "RL", "RR"),
                     help="friction per foot used by the MPC (needs --mpc perfoot)")
+    ap.add_argument("--flat-cone", action="store_true",
+                    help="keep the world-vertical friction cone instead of the terrain-slope one, to compare "
+                         "(needs --mpc perfoot)")
     ap.add_argument("--seed", type=int, default=None,
                     help=f"jitter the spawn by +-{JITTER_XY} m in x, y and +-{np.rad2deg(JITTER_YAW):.0f} deg in yaw")
     ap.add_argument("--log-dir", default="data/run_waypoints")
     ap.add_argument("--tag", default=None, help="log file name stem (default <scene>_<path>_<timestamp>)")
     a = ap.parse_args()
     run(a.course, a.path, a.v_ref, a.timeout, render=not a.no_render, log_dir=a.log_dir, plot=a.plot,
-        mpc_kind=a.mpc, walls=a.wall, mu_feet=a.mu, seed=a.seed, tag=a.tag)
+        mpc_kind=a.mpc, walls=a.wall, mu_feet=a.mu, seed=a.seed, tag=a.tag, slope_cone=not a.flat_cone)
