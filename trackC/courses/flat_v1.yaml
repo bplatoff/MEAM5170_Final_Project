@@ -17,7 +17,7 @@ course:
   ramp: {length_along_slope: 6.0, angle_deg: 0}
   upper_flat: {length: 3.0}
   base_class: medium                           # friction of everything not covered by a region
-  ramp_mu_floor: 0.5                          # sheet: 0.25 to 0.30 initially; 0.20 only as a stress test
+  ramp_mu_floor: 0.5                         
   walls: {height: 0.5, thickness: 0.1}
   wall_clearance: 0.5                          # start and goal must be at least this far from every wall
   start: [0.0, 0.0]
@@ -26,9 +26,7 @@ course:
 friction_classes: {low: 0.20, medium: 0.50, high: 0.80}
 randomize_ranges: {low: [0.15, 0.25], medium: [0.40, 0.60], high: [0.70, 0.90]}
 
-# 8 polygonal regions. Give either `class` or an explicit `mu`. Two regions cross a crease on purpose.
 regions: []
 
-# 4 obstacles: a gateway on the lower flat and a narrow passage on the upper flat.
-# The passage width (0.7 m here) is a placeholder until the robust tube radius is measured.
+
 obstacles: []
