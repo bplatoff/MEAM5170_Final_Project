@@ -20,9 +20,11 @@ def add_obstacle_constraints(state, obstacles, r_robot, beta, g, lbg, ubg):
 
                 s_vec = ca.vertcat(*violations)
 
-                smooth_max = (
-                    ca.log(ca.sum1(ca.exp(beta*s_vec))) / beta
-                    - np.log(len(violations)) / beta)
+                # Numerically stable conservative smooth maximum
+                scaled = beta * s_vec
+                shift = ca.mmax(scaled)
+
+                smooth_max = (shift + ca.log(ca.sum1(ca.exp(scaled - shift))) - np.log(len(violations))) / beta
 
                 g.append(smooth_max)
                 lbg.append([0])
@@ -54,7 +56,7 @@ def plan_trajectory(start_state, goal_state, environment, config):
 
     # get obstacles
     obstacles = environment.obstacles # list of polygons
-    beta = 20
+    beta = 100
 
     # create inflation radius
     length = config['robot_length']

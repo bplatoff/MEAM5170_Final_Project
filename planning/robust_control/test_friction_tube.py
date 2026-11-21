@@ -2,6 +2,13 @@
 import unittest
 import numpy as np
 from planning.robust_control.friction_tube import compute_friction_tube
+from planning.robust_control.friction_tube import (
+    friction_acceleration_bound,
+    p_norm_disturbance_bound,
+    propagate_tube,
+    p_norm_to_position_radius,
+    compute_friction_tube_position_radii,
+)
 
 from planning.robust_control.friction_tube import (
     friction_acceleration_bound,
@@ -469,6 +476,60 @@ class TestFrictionTube(unittest.TestCase):
 
         # Residual uncertainty is present even without a friction gap.
         self.assertGreater(actual[1], 0.0)
+
+
+    def test_position_radius_diagonal_P(self):
+        """Converts a simple weighted ellipsoid into meters."""
+        P = np.diag([4.0, 9.0, 1.0, 1.0])
+        alpha = np.array([0.0, 1.0, 2.0])
+
+        result = p_norm_to_position_radius(alpha, P)
+
+        np.testing.assert_allclose(result, [0.0, 0.5, 1.0])
+
+    def test_position_radius_coupled_P(self):
+        """Accounts for position-velocity coupling in P."""
+        P = np.array([
+            [2.0, 0.0, 1.0, 0.0],
+            [0.0, 2.0, 0.0, 1.0],
+            [1.0, 0.0, 2.0, 0.0],
+            [0.0, 1.0, 0.0, 2.0],
+        ])
+        alpha = np.array([0.0, 0.5, 1.0])
+
+        result = p_norm_to_position_radius(alpha, P)
+
+        np.testing.assert_allclose(
+            result, alpha * np.sqrt(2.0 / 3.0)
+        )
+
+
+    def test_position_radius_full_pipeline(self):
+        """Public interface returns position radii in meters."""
+        stance = np.ones((3, 4))
+        forces = np.full((3, 4), 50.0)
+
+        args = dict(
+            stance_mask=stance,
+            normal_forces=forces,
+            mu_plan=0.5,
+            mu_lo=0.3,
+            mass=20.0,
+            B=self.B,
+            P=self.P,
+            rho=self.rho,
+        )
+
+        alpha = compute_friction_tube(**args)
+
+        radii_m = compute_friction_tube_position_radii(**args)
+
+        expected = p_norm_to_position_radius(alpha, self.P)
+
+        np.testing.assert_allclose(radii_m, expected)
+        self.assertEqual(radii_m.shape, (4,))
+        self.assertAlmostEqual(radii_m[0], 0.0)
+        self.assertTrue(np.all(radii_m >= 0.0))
 
 
 
