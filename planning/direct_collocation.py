@@ -4,7 +4,9 @@ import numpy as np
 from planning.planner_helpers import (
     polygon_halfspaces,
     astar_initial_path,
-    sample_path)
+    sample_path,
+    sample_path_heading)
+from planning.robot_footprint import add_three_circle_constraints
 
 
 def add_obstacle_constraints(state, obstacles, r_robot, beta, g, lbg, ubg):
@@ -64,12 +66,27 @@ def plan_trajectory(start_state, goal_state, environment, config):
     r_safety = config['r_safety']
     r_robot = np.sqrt((length/2)**2 + (width/2)**2) + r_safety
 
-    # extract bounds and speed limits
-    x_min, x_max, y_min, y_max  = environment.bounds
-    x_min += r_robot
-    x_max -= r_robot
-    y_min += r_robot
-    y_max -= r_robot
+    # Explicit opt-in while the yaw reference and controller interface are validated.
+    footprint_model = config.get("footprint_model", "single_circle")
+    if footprint_model not in ("single_circle", "three_circle"):
+        raise ValueError("footprint_model must be 'single_circle' or 'three_circle'")
+
+    yaw_mode = config.get("footprint_yaw_mode", "path_tangent")
+    if footprint_model == "three_circle" and yaw_mode not in ("path_tangent", "fixed"):
+        raise ValueError("footprint_yaw_mode must be 'path_tangent' or 'fixed'")
+    fixed_yaw = float(config.get("footprint_yaw", 0.0))
+    if not np.isfinite(fixed_yaw):
+        raise ValueError("footprint_yaw must be finite")
+
+    # Keep the existing conservative single-disc A* seed for now. This
+    # can reject some narrow paths which the three-circle NLP could use.
+    x_min, x_max, y_min, y_max = environment.bounds
+    astar_bounds = (x_min + r_robot, x_max - r_robot,
+                    y_min + r_robot, y_max - r_robot)
+    # The NLP can use the full map; three-circle constraints tighten each
+    # wall independently based on the supplied yaw reference.
+    state_bounds = astar_bounds if footprint_model == "single_circle" else environment.bounds
+    sx_min, sx_max, sy_min, sy_max = state_bounds
     max_speed = config['max_speed']
 
     # get A* path for good initial guesses
@@ -78,11 +95,26 @@ def plan_trajectory(start_state, goal_state, environment, config):
 
     astar_path = astar_initial_path(start_state=start_state,
                                     goal_state=goal_state,
-                                    bounds=(x_min, x_max, y_min, y_max),
+                                    bounds=astar_bounds,
                                     obstacles=obstacles,
                                     inflation_radius=r_robot,
                                     resolution=resolution,
                                     extra_clearance=clearance)
+
+    def nominal_yaw(fraction):
+        if yaw_mode == "fixed":
+            return fixed_yaw
+        return sample_path_heading(fraction, astar_path, fallback_yaw=fixed_yaw)
+
+    def add_collision_constraints(state, fraction, g, lbg, ubg):
+        if footprint_model == "single_circle":
+            add_obstacle_constraints(state, obstacles, r_robot, beta, g, lbg, ubg)
+        else:
+            add_three_circle_constraints(
+                state[:2], nominal_yaw(fraction), obstacles,
+                environment.bounds, length, width, r_safety, beta,
+                g, lbg, ubg,
+            )
 
 
     # coefficients of the collocation equation - eventually use to impose x_dot = f(x, u)
@@ -164,6 +196,10 @@ def plan_trajectory(start_state, goal_state, environment, config):
     ubz.append(start_state) 
     z0.append(start_state) 
     x_plot.append(Xk)
+    # The start state is fixed, but its complete footprint still needs a
+    # collision constraint in three-circle mode.
+    if footprint_model == "three_circle":
+        add_collision_constraints(Xk, 0.0, g, lbg, ubg)
 
     # formulate NLP
     for k in range(N):
@@ -197,8 +233,8 @@ def plan_trajectory(start_state, goal_state, environment, config):
             Xkj = ca.MX.sym('X_' + str(k) + '_' + str(j), 4) # Xkj = [pxkj pykj, vxkj, vykj]
             Xc.append(Xkj)
             z.append(Xkj)
-            lbz.append([x_min, y_min, -np.inf, -np.inf]) # enforce boundary constraint
-            ubz.append([x_max, y_max, np.inf, np.inf])
+            lbz.append([sx_min, sy_min, -np.inf, -np.inf]) # enforce boundary constraint
+            ubz.append([sx_max, sy_max, np.inf, np.inf])
 
             # add max_speed constraint
             Vx = Xkj[2]
@@ -208,11 +244,11 @@ def plan_trajectory(start_state, goal_state, environment, config):
             lbg.append([0])
             ubg.append([max_speed**2])
 
-            # add constraints for obstacle avoidance
-            add_obstacle_constraints(Xkj, obstacles, r_robot, beta, g, lbg, ubg)
+            # Geometry is evaluated at the nominal yaw for this time index.
+            alpha = (k + tau_root[j+1])/N
+            add_collision_constraints(Xkj, alpha, g, lbg, ubg)
 
             # make initial guess for optimization variable - midpoint state between collocation points Xkj
-            alpha = (k + tau_root[j+1])/N  
 
             position_guess = sample_path(alpha, astar_path)
 
@@ -246,8 +282,8 @@ def plan_trajectory(start_state, goal_state, environment, config):
         # collocation points
         Xk = ca.MX.sym('X_' + str(k+1), 4)
         z.append(Xk)
-        lbz.append([x_min, y_min, -np.inf, -np.inf]) # enforce boundary constraint
-        ubz.append([x_max, y_max, np.inf, np.inf])
+        lbz.append([sx_min, sy_min, -np.inf, -np.inf]) # enforce boundary constraint
+        ubz.append([sx_max, sy_max, np.inf, np.inf])
 
         # add max_speed constraint
         Vx = Xk[2]
@@ -266,8 +302,8 @@ def plan_trajectory(start_state, goal_state, environment, config):
 
         x_plot.append(Xk)
 
-        # add constraints for obstacle avoidance
-        add_obstacle_constraints(Xk, obstacles, r_robot, beta, g, lbg, ubg)
+        # Apply circle and wall constraints at each knot, too.
+        add_collision_constraints(Xk, (k+1)/N, g, lbg, ubg)
 
         # add equality constraint
         g.append(Xk_end - Xk) # enforce continuity constraints - end of one section aligns with start of next
@@ -308,12 +344,17 @@ def plan_trajectory(start_state, goal_state, environment, config):
 
     stats = solver.stats()
 
-    return {
+    result = {
         "t": t,
         "x": x_opt.T,
         "u": u_opt.T,
         "success": stats["success"],
-        "return_status": stats["return_status"]
+        "return_status": stats["return_status"],
     }
+    if footprint_model == "three_circle":
+        # Downstream controllers must track, or conservatively bound error
+        # relative to, this prescribed orientation reference.
+        result["yaw_ref"] = np.array([nominal_yaw(k/N) for k in range(N+1)])
+    return result
 
 

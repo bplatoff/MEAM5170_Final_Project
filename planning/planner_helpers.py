@@ -264,3 +264,20 @@ def sample_path(alpha, path):
         path[segment_index]
         + local_alpha * segments[segment_index]
     )
+
+def sample_path_heading(alpha, path, window=0.02, fallback_yaw=0.0):
+    """Reference yaw [rad] from the local tangent of a sampled A* polyline.
+
+    This is a FIXED reference supplied to the NLP, not an optimized yaw state.
+    The symmetric arc-length window reduces sensitivity to individual grid steps.
+    """
+    if not 0 < window <= 0.5 or not np.isfinite(window):
+        raise ValueError("window must lie in (0, 0.5]")
+    if not np.isfinite(fallback_yaw):
+        raise ValueError("fallback_yaw must be finite")
+    before = sample_path(max(0.0, alpha - window), path)
+    after = sample_path(min(1.0, alpha + window), path)
+    direction = after - before
+    if np.linalg.norm(direction) < 1e-10:
+        return float(fallback_yaw)
+    return float(np.arctan2(direction[1], direction[0]))

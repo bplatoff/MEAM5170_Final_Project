@@ -4,6 +4,8 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
+from planning.planner_helpers import point_in_inflated_polygon
+from planning.robot_footprint import three_circle_centers, three_circle_parameters
 from planning.mock_environment import (
     make_empty_environment,
     make_single_obstacle_environment,
@@ -80,6 +82,25 @@ def validate_result(result, start_state, goal_state, environment, config):
     robot_width = config["robot_width"]
     r_safety = config["r_safety"]
 
+    if config.get("footprint_model") == "three_circle":
+        # Independently check all three circles against walls and polygons
+        # at each returned knot. This does NOT certify between-node motion.
+        yaw_ref = np.asarray(result["yaw_ref"])
+        assert yaw_ref.shape == (len(x),)
+        _, radius = three_circle_parameters(robot_length, robot_width, r_safety)
+        xmin, xmax, ymin, ymax = environment.bounds
+        for k, state in enumerate(x):
+            for center in three_circle_centers(state[:2], yaw_ref[k], robot_length):
+                cx, cy = center
+                assert xmin + radius - 1e-4 <= cx <= xmax - radius + 1e-4, f"Wall collision at {k}"
+                assert ymin + radius - 1e-4 <= cy <= ymax - radius + 1e-4, f"Wall collision at {k}"
+                for obs_idx, obstacle in enumerate(environment.obstacles):
+                    assert not point_in_inflated_polygon(center, obstacle, radius - 1e-4), (
+                        f"Circle collides with obstacle {obs_idx} at knot {k}"
+                    )
+        print("Three-circle knot checks passed (at nominal yaw).")
+        return
+
     r_robot = np.sqrt(
         (robot_length / 2)**2 +
         (robot_width / 2)**2
@@ -113,7 +134,7 @@ def validate_result(result, start_state, goal_state, environment, config):
     print(f"Max accel: {np.max(np.linalg.norm(u, axis=1)):.3f} m/s^2")
 
 
-def plot_result(result, start_state, goal_state, environment):
+def plot_result(result, start_state, goal_state, environment, config=None):
     t = np.asarray(result["t"], dtype=float)
     x = np.asarray(result["x"], dtype=float)
     u = np.asarray(result["u"], dtype=float)
@@ -122,6 +143,22 @@ def plot_result(result, start_state, goal_state, environment):
     ax.plot(x[:, 0], x[:, 1], "-o", markersize=3, label="planned CoM path")
     ax.plot(start_state[0], start_state[1], "o", markersize=8, label="start")
     ax.plot(goal_state[0], goal_state[1], "x", markersize=10, label="goal")
+    if "yaw_ref" in result:
+        # Show the actual assumed footprint, not the old single-disc model.
+        # The circles are plotted at a few knots to keep the figure readable.
+        if config is None:
+            raise ValueError("config required to plot the three-circle footprint")
+        length = config["robot_length"]
+        width = config["robot_width"]
+        safety = config["r_safety"]
+        _, radius = three_circle_parameters(length, width, safety)
+        for idx in np.linspace(0, len(x) - 1, 7, dtype=int):
+            yaw = result["yaw_ref"][idx]
+            for center in three_circle_centers(x[idx, :2], yaw, length):
+                ax.add_patch(plt.Circle(center, radius, fill=False, alpha=0.5))
+            ax.arrow(x[idx, 0], x[idx, 1], 0.35 * np.cos(yaw),
+                     0.35 * np.sin(yaw), head_width=0.06,
+                     length_includes_head=True, alpha=0.6)
     ax.legend()
     plt.tight_layout()
 
@@ -156,6 +193,9 @@ def main():
     parser.add_argument("--T", type=float, default=12.0)
     parser.add_argument("--max-speed", type=float, default=1.0)
     parser.add_argument("--no-plot", action="store_true")
+    parser.add_argument("--footprint-model", choices=["single_circle", "three_circle"], default="single_circle")
+    parser.add_argument("--yaw-mode", choices=["fixed", "path_tangent"], default="path_tangent")
+    parser.add_argument("--fixed-yaw", type=float, default=0.0)
     parser.add_argument("--smoothness_weight", type=float, default = 1.0)
     args = parser.parse_args()
 
@@ -172,7 +212,10 @@ def main():
         "robot_width": 0.31,
         "r_safety": 0.05,
         "astar_resolution": 0.1,
-        "astar_clearance": 0.01
+        "astar_clearance": 0.01,
+        "footprint_model": args.footprint_model,
+        "footprint_yaw_mode": args.yaw_mode,
+        "footprint_yaw": args.fixed_yaw,
     }
 
     print(f"Scenario: {environment.name}")
@@ -191,7 +234,7 @@ def main():
     validate_result(result, start_state, goal_state, environment, config)
 
     if not args.no_plot:
-        plot_result(result, start_state, goal_state, environment)
+        plot_result(result, start_state, goal_state, environment, config)
 
         
 
