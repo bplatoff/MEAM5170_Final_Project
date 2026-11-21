@@ -80,7 +80,7 @@ def validate_result(result, start_state, goal_state, environment, config):
     # independently check returned knot states against inflated obstacles
     robot_length = config["robot_length"]
     robot_width = config["robot_width"]
-    r_safety = config["r_safety"]
+    r_safety = config["r_safety"] + config.get("tube_position_margin_m", 0.0)
 
     if config.get("footprint_model") == "three_circle":
         # Independently check all three circles against walls and polygons
@@ -150,7 +150,7 @@ def plot_result(result, start_state, goal_state, environment, config=None):
             raise ValueError("config required to plot the three-circle footprint")
         length = config["robot_length"]
         width = config["robot_width"]
-        safety = config["r_safety"]
+        safety = config["r_safety"] + config.get("tube_position_margin_m", 0.0)
         _, radius = three_circle_parameters(length, width, safety)
         for idx in np.linspace(0, len(x) - 1, 7, dtype=int):
             yaw = result["yaw_ref"][idx]

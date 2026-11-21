@@ -7,6 +7,8 @@ from planning.planner_helpers import (
     sample_path,
     sample_path_heading)
 from planning.robot_footprint import add_three_circle_constraints
+from planning.footprint_astar import astar_three_circle_path
+from planning.yaw_reference import make_rate_limited_yaw_reference
 
 
 def add_obstacle_constraints(state, obstacles, r_robot, beta, g, lbg, ubg):
@@ -64,7 +66,13 @@ def plan_trajectory(start_state, goal_state, environment, config):
     length = config['robot_length']
     width = config['robot_width']
     r_safety = config['r_safety']
-    r_robot = np.sqrt((length/2)**2 + (width/2)**2) + r_safety
+    tube_margin_m = float(config.get("tube_position_margin_m", 0.0))
+    if not np.isfinite(tube_margin_m) or tube_margin_m < 0.0:
+        raise ValueError("tube_position_margin_m must be finite and nonnegative")
+    # The tube is a horizontal position error in meters, not a P-norm radius.
+    # Inflate every footprint circle and both the A* warm start and NLP constraints.
+    effective_safety_margin = r_safety + tube_margin_m
+    r_robot = np.sqrt((length/2)**2 + (width/2)**2) + effective_safety_margin
 
     # Explicit opt-in while the yaw reference and controller interface are validated.
     footprint_model = config.get("footprint_model", "single_circle")
@@ -93,17 +101,41 @@ def plan_trajectory(start_state, goal_state, environment, config):
     resolution = config["astar_resolution"]
     clearance = config["astar_clearance"]
 
-    astar_path = astar_initial_path(start_state=start_state,
-                                    goal_state=goal_state,
-                                    bounds=astar_bounds,
-                                    obstacles=obstacles,
-                                    inflation_radius=r_robot,
-                                    resolution=resolution,
-                                    extra_clearance=clearance)
+    if footprint_model == "three_circle":
+        astar_path = astar_three_circle_path(
+            start_state=start_state, goal_state=goal_state,
+            bounds=environment.bounds, obstacles=obstacles,
+            length=length, width=width, safety_margin=effective_safety_margin,
+            resolution=resolution, extra_clearance=clearance,
+            yaw_mode=yaw_mode, fixed_yaw=fixed_yaw,
+        )
+    else:
+        astar_path = astar_initial_path(
+            start_state=start_state, goal_state=goal_state,
+            bounds=astar_bounds, obstacles=obstacles,
+            inflation_radius=r_robot, resolution=resolution,
+            extra_clearance=clearance,
+        )
+
+    # Optional bounded-rate yaw reference: same orientation is used both
+    # by the NLP collision constraints and in the returned yaw_ref.
+    # Without this opt-in the original A*-tangent behavior is unchanged.
+    max_yaw_rate = config.get("footprint_max_yaw_rate")
+    yaw_at = None
+    if footprint_model == "three_circle" and yaw_mode == "path_tangent" and max_yaw_rate is not None:
+        sample_fractions = [0.0]
+        for k in range(N):
+            sample_fractions.extend((k + float(tau))/N for tau in tau_root[1:])
+            sample_fractions.append((k+1)/N)
+        yaw_at, _ = make_rate_limited_yaw_reference(
+            astar_path, sample_fractions, T, float(max_yaw_rate), initial_yaw=fixed_yaw
+        )
 
     def nominal_yaw(fraction):
         if yaw_mode == "fixed":
             return fixed_yaw
+        if yaw_at is not None:
+            return yaw_at(fraction)
         return sample_path_heading(fraction, astar_path, fallback_yaw=fixed_yaw)
 
     def add_collision_constraints(state, fraction, g, lbg, ubg):
@@ -112,7 +144,7 @@ def plan_trajectory(start_state, goal_state, environment, config):
         else:
             add_three_circle_constraints(
                 state[:2], nominal_yaw(fraction), obstacles,
-                environment.bounds, length, width, r_safety, beta,
+                environment.bounds, length, width, effective_safety_margin, beta,
                 g, lbg, ubg,
             )
 
@@ -352,6 +384,7 @@ def plan_trajectory(start_state, goal_state, environment, config):
         "return_status": stats["return_status"],
     }
     if footprint_model == "three_circle":
+        result["astar_path"] = astar_path.copy()  # geometric warm start, useful for debugging
         # Downstream controllers must track, or conservatively bound error
         # relative to, this prescribed orientation reference.
         result["yaw_ref"] = np.array([nominal_yaw(k/N) for k in range(N+1)])
