@@ -131,6 +131,37 @@ def propagate_tube(r_w, rho, alpha_0=0.0):
 
     return alpha
 
+def p_norm_to_position_radius(alpha, P):
+    """
+    Convert P-norm tube bounds to conservative horizontal
+    position-error radii [m].
+
+    State order: [px, py, vx, vy].
+    """
+    alpha = np.asarray(alpha, dtype=float)
+    P = np.asarray(P, dtype=float)
+
+    if alpha.ndim != 1 or not np.all(np.isfinite(alpha)):
+        raise ValueError("alpha must be a finite 1D array")
+    if np.any(alpha < 0):
+        raise ValueError("alpha must be nonnegative")
+
+    if P.shape != (4, 4) or not np.all(np.isfinite(P)):
+        raise ValueError("P must be a finite 4x4 matrix")
+    if not np.allclose(P, P.T) or np.min(np.linalg.eigvalsh(P)) <= 0:
+        raise ValueError("P must be symmetric positive definite")
+
+    # Extract x/y position errors from the four-state error.
+    C = np.eye(4)[:2, :]
+
+    # Project the P-norm ellipsoid onto the position plane.
+    projected = C @ np.linalg.solve(P, C.T)
+
+    # Largest possible Euclidean position error for alpha = 1.
+    scale = np.sqrt(np.max(np.linalg.eigvalsh(projected)))
+
+    return alpha * scale
+
 def compute_friction_tube(
     stance_mask,
     normal_forces,
@@ -160,3 +191,37 @@ def compute_friction_tube(
     alpha = propagate_tube(r_w, rho, alpha_0)
 
     return alpha
+
+def compute_friction_tube_position_radii(
+    stance_mask,
+    normal_forces,
+    mu_plan,
+    mu_lo,
+    mass,
+    B,
+    P,
+    rho,
+    r0=0.0,
+    alpha_0=0.0,
+):
+    """
+    Compute conservative horizontal position-error radii [m]
+    at each step of the planning horizon.
+
+    Returns:
+        radii_m: (N+1,) position radii in meters
+    """
+    alpha = compute_friction_tube(
+        stance_mask=stance_mask,
+        normal_forces=normal_forces,
+        mu_plan=mu_plan,
+        mu_lo=mu_lo,
+        mass=mass,
+        B=B,
+        P=P,
+        rho=rho,
+        r0=r0,
+        alpha_0=alpha_0,
+    )
+
+    return p_norm_to_position_radius(alpha, P)
