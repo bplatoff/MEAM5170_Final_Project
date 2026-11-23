@@ -12,10 +12,69 @@ predictions or a validated residual disturbance bound, this is only a modeled
 robust clearance, not a full-robot collision guarantee.
 """
 
+import logging
+
 import numpy as np
 
 from planning.direct_collocation import plan_trajectory
 from planning.robust_control.friction_tube import compute_friction_tube_position_radii
+
+_LOG = logging.getLogger(__name__)
+
+
+def _run_planning_pass(start_state, goal_state, environment, config):
+    """Normalize known planning failures; leave programming/config errors visible.
+
+    The direct planner returns structured failures when continuous clearance is
+    enabled (PR #9), but legacy A* and CasADi paths can still raise RuntimeError.
+    Only recognized A*/solver exceptions are converted into expected failures.
+    """
+    try:
+        return plan_trajectory(start_state, goal_state, environment, config)
+    except RuntimeError as exc:
+        message = str(exc)
+        if message.startswith((
+            "Three-circle A*", "Heading-aware three-circle A*",
+            "A* could not find a collision-free path",
+        )):
+            status = "planning_failed"
+        elif (type(exc).__name__ == "_CollocationSolverError"
+              or "IpoptInterface" in message
+              or "Error in Function::call for 'solver'" in message):
+            status = "solver_failed"
+        else:
+            raise  # Unexpected runtime error: do not hide a potential bug.
+        return {"success": False, "planning_status": status,
+                "return_status": message}
+
+
+def _failed_outcome(stage, failed_plan, *, nominal=None, radii=None,
+                    margin=None, robust_config=None):
+    """Never offer a failed plan in the executable `robust` slot."""
+    status = failed_plan.get("planning_status") or "solver_failed"
+    reason = failed_plan.get("return_status")
+    if reason is None:
+        reason = "Planner returned success=False without a return_status"
+    diagnostics = {key: failed_plan[key] for key in (
+        "repair_attempts", "certification", "repair_history",
+    ) if key in failed_plan}
+    concise_reason = " ".join(str(reason).split())
+    if len(concise_reason) > 240:
+        concise_reason = concise_reason[:237] + "..."
+    _LOG.warning("Two-pass planning failed: stage=%s, status=%s, reason=%s",
+                 stage, status, concise_reason)
+    return {
+        "success": False,
+        "failed_stage": stage,
+        "planning_status": status,
+        "return_status": str(reason),
+        "nominal": nominal,  # Only a successfully completed nominal trajectory.
+        "robust": None,      # Never substitute a nominal plan for the robust plan.
+        "tube_position_radii_m": radii,
+        "tube_position_margin_m": margin,
+        "robust_config": robust_config,
+        "failure_diagnostics": diagnostics,
+    }
 
 
 def plan_two_pass_friction_tube(
@@ -37,6 +96,12 @@ def plan_two_pass_friction_tube(
     The max radius is used at *all* positions, including start and goal,
     per the team's global-planner upper-bound rule. The midlayer can use
     time-dependent radii along its own prediction horizon.
+
+    Returns success=True only when both passes succeed. Expected A*/solver/
+    certification failures return success=False, failed_stage, planning_status,
+    and return_status. On robust-pass failure the valid nominal trajectory is
+    retained for diagnostics only; robust is None. Consumers MUST check the
+    top-level success flag before using a reference. Input/config errors raise.
     """
     if config.get("footprint_model") != "three_circle":
         raise ValueError("two-pass planner requires footprint_model='three_circle'")
@@ -50,9 +115,9 @@ def plan_two_pass_friction_tube(
     # First pass: footprint + geometric safety margin, with no tube.
     nominal_config = dict(config)
     nominal_config["tube_position_margin_m"] = 0.0
-    nominal = plan_trajectory(start_state, goal_state, environment, nominal_config)
+    nominal = _run_planning_pass(start_state, goal_state, environment, nominal_config)
     if not nominal["success"]:
-        raise RuntimeError("nominal global planner did not converge")
+        return _failed_outcome("nominal", nominal)
 
     predictions = predict_contacts(nominal)
     if not isinstance(predictions, dict):
@@ -97,11 +162,19 @@ def plan_two_pass_friction_tube(
     # three footprint circles and both A* and NLP collision constraints.
     robust_config = dict(config)
     robust_config["tube_position_margin_m"] = margin_m
-    robust = plan_trajectory(start_state, goal_state, environment, robust_config)
+    robust = _run_planning_pass(start_state, goal_state, environment, robust_config)
     if not robust["success"]:
-        raise RuntimeError("tube-inflated global planner did not converge")
+        return _failed_outcome(
+            "robust", robust, nominal=nominal, radii=radii_m,
+            margin=margin_m, robust_config=robust_config,
+        )
 
     return {
+        "success": True,
+        "failed_stage": None,
+        "planning_status": "success",
+        "return_status": robust.get("return_status"),
+        "failure_diagnostics": {},
         "nominal": nominal,
         "robust": robust,
         "tube_position_radii_m": radii_m,
