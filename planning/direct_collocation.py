@@ -98,7 +98,8 @@ def plan_trajectory(start_state, goal_state, environment, config):
     max_speed = config['max_speed']
 
     # get A* path for good initial guesses
-    resolution = config["astar_resolution"]
+    # Default to the benchmarked 5 cm A* grid; explicit caller overrides remain supported.
+    resolution = config.get("astar_resolution", 0.05)
     clearance = config["astar_clearance"]
 
     if footprint_model == "three_circle":
