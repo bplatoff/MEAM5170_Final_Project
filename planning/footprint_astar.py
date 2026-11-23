@@ -46,7 +46,7 @@ def _segment_hits_convex_polygon(p0, p1, normals, offsets):
 
 def astar_three_circle_path(
     start_state, goal_state, bounds, obstacles, length, width,
-    safety_margin=0.05, resolution=0.1, extra_clearance=0.01,
+    safety_margin=0.05, resolution=0.05, extra_clearance=0.01,
     yaw_mode="path_tangent", fixed_yaw=0.0, turn_penalty=0.05,
 ):
     """Find a collision-checked geometric A* path for three body circles.
@@ -194,7 +194,17 @@ def astar_three_circle_path(
                 reachable.add(ij)
                 queue.append(ij)
     if start_index not in reachable:
-        raise RuntimeError("Three-circle A*: center circle cannot reach the goal on this grid")
+        if not center_free(start_index):
+            reason = "start center is blocked at its nearest grid node"
+        elif not center_free(goal_index):
+            reason = "goal center is blocked at its nearest grid node"
+        else:
+            reason = "center-circle grid connectivity search found no route"
+        raise RuntimeError(
+            f"Three-circle A* initialization failed ({reason}; "
+            f"resolution={resolution:g} m). A grid-search failure does not "
+            "establish that no continuous collision-free path exists."
+        )
 
     # The initial yaw is unconstrained by the four-state planner; choose
     # the heading of the first travel edge. In fixed mode use fixed_yaw.
@@ -258,7 +268,12 @@ def astar_three_circle_path(
                 heapq.heappush(heap, (priority, new_cost, new_node))
 
     if success is None:
-        raise RuntimeError("Heading-aware three-circle A* could not find a collision-free path")
+        raise RuntimeError(
+            "Three-circle A* initialization failed (heading/edge/turn "
+            f"search exhausted; resolution={resolution:g} m). "
+            "A grid-search failure does not establish that no continuous "
+            "collision-free path exists."
+        )
 
     nodes = [success]
     while nodes[-1] != start_node:

@@ -108,9 +108,9 @@ config = {
     "smoothness_weight": 1.0,
     "robot_length": 0.7,
     "robot_width": 0.31,
-    "r_safety": 0.1,
-    "astar_resolution": 0.1,
-    "astar_clearance": 0.1,
+    "r_safety": 0.05,
+    "astar_resolution": 0.05,
+    "astar_clearance": 0.01,
 }
 ```
 
@@ -222,11 +222,27 @@ The final trajectory is still determined by the direct-collocation optimization 
 Current A* development defaults are:
 
 ```text
-resolution = 0.10 m
-extra initial-guess clearance = 0.10 m
+resolution = 0.05 m
+extra initial-guess clearance = 0.01 m
 ```
 
 The extra A* clearance only affects the warm start; it is not an additional final obstacle constraint.
+
+### A* discretization limitation (November 2026)
+
+The default A* grid was refined from 0.10 m to **0.05 m** following
+narrow-passage and grid-alignment benchmarks. On two representative complex
+courses this added approximately 5–8 seconds to A* initialization, while
+recovering additional geometrically usable narrow passages. Refining to
+0.025 m was approximately 17–20 times slower than the original 0.10 m
+grid on those courses, so there is **no automatic finer-grid fallback**.
+
+This remains a discrete eight-heading grid search, not a continuous
+feasibility proof. If initialization fails, the error identifies whether
+grid-center connectivity or heading/edge/turn search failed and reports the
+resolution used. The result does **not** prove that no continuous route exists.
+Explicit `astar_resolution` values still override the default. Revisit grid
+resolution or alternative initialization if A* becomes a planning bottleneck.
 
 A* also provides a useful geometric feasibility check before IPOPT is run.
 

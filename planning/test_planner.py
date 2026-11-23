@@ -193,6 +193,7 @@ def main():
     parser.add_argument("--T", type=float, default=12.0)
     parser.add_argument("--max-speed", type=float, default=1.0)
     parser.add_argument("--no-plot", action="store_true")
+    parser.add_argument("--astar-resolution", type=float, default=0.05)
     parser.add_argument("--footprint-model", choices=["single_circle", "three_circle"], default="single_circle")
     parser.add_argument("--yaw-mode", choices=["fixed", "path_tangent"], default="path_tangent")
     parser.add_argument("--fixed-yaw", type=float, default=0.0)
@@ -211,7 +212,7 @@ def main():
         "robot_length": 0.7,
         "robot_width": 0.31,
         "r_safety": 0.05,
-        "astar_resolution": 0.1,
+        "astar_resolution": args.astar_resolution,
         "astar_clearance": 0.01,
         "footprint_model": args.footprint_model,
         "footprint_yaw_mode": args.yaw_mode,
