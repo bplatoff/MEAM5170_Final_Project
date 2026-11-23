@@ -11,6 +11,10 @@ from planning.footprint_astar import astar_three_circle_path
 from planning.yaw_reference import make_rate_limited_yaw_reference
 
 
+class _CollocationSolverError(RuntimeError):
+    """Failure while building or executing the numerical NLP solver."""
+
+
 def add_obstacle_constraints(state, obstacles, r_robot, beta, g, lbg, ubg):
     """Helper function to add obstacle constraints to the direct collocation problem """
     for obstacle in obstacles:
@@ -35,7 +39,10 @@ def add_obstacle_constraints(state, obstacles, r_robot, beta, g, lbg, ubg):
                 ubg.append([np.inf])
 
 
-def plan_trajectory(start_state, goal_state, environment, config):
+def _solve_collocation_once(
+    start_state, goal_state, environment, config, *,
+    repair_times=(), repair_clearance_m=0.0, warm_start=None,
+):
     # degree of interpolating polynomial
     d = 3  
 
@@ -258,6 +265,23 @@ def plan_trajectory(start_state, goal_state, environment, config):
 
         U_prev = Uk
 
+        # Adaptive continuous-clearance repair: add only the offending times.
+        # Translation is exact for the constant-acceleration double integrator.
+        # The yaw is the SAME fixed/rate-limited nominal yaw used elsewhere
+        # in this NLP. No additional state or grid points are introduced.
+        for time_s in repair_times:
+            time_s = float(time_s)
+            if k * h - 1e-10 <= time_s < (k+1)*h - 1e-10:
+                tau = np.clip(time_s - k*h, 0.0, h)
+                pos_at_t = (Xk[:2] + tau * Xk[2:4] +
+                            0.5 * tau**2 * Uk)
+                add_three_circle_constraints(
+                    pos_at_t, nominal_yaw(time_s / T), obstacles,
+                    environment.bounds, length, width,
+                    effective_safety_margin + repair_clearance_m,
+                    beta, g, lbg, ubg,
+                )
+
         # state at collocation points
         Xc = []
         # points between collocation points
@@ -358,23 +382,26 @@ def plan_trajectory(start_state, goal_state, environment, config):
     lbg = np.concatenate(lbg)
     ubg = np.concatenate(ubg)
 
-    # create NLP solver
+    if warm_start is not None:
+        initial = np.asarray(warm_start, dtype=float).reshape(-1)
+        if initial.shape == z0.shape and np.all(np.isfinite(initial)):
+            z0 = initial
+
+    # Keep solver failures distinguishable from A* initialization failures.
+    # CasADi/IPOPT may raise RuntimeError instead of returning a failed status.
     prob = {'f': J, 'x': z, 'g': g}
-    solver = ca.nlpsol('solver', 'ipopt', prob)
-
-    # function to get x and u trajectories from z
-    trajectories = ca.Function('trajectories', [z], [x_plot, u_plot], ['z'], ['x', 'u'])
-
-    # solve the NLP
-    sol = solver(x0 = z0, lbx = lbz, ubx = ubz, lbg = lbg, ubg = ubg)
-    x_opt, u_opt = trajectories(sol['x']) # optimal trajectories
-    x_opt = x_opt.full() # to numpy array
-    u_opt = u_opt.full() # to numpy array
-
+    try:
+        solver = ca.nlpsol('solver', 'ipopt', prob)
+        trajectories = ca.Function('trajectories', [z], [x_plot, u_plot], ['z'], ['x', 'u'])
+        sol = solver(x0=z0, lbx=lbz, ubx=ubz, lbg=lbg, ubg=ubg)
+        x_opt, u_opt = trajectories(sol['x'])
+        x_opt = x_opt.full()
+        u_opt = u_opt.full()
+        stats = solver.stats()
+    except RuntimeError as exc:
+        raise _CollocationSolverError(str(exc)) from exc
 
     t = np.linspace(0, T, N+1)
-
-    stats = solver.stats()
 
     result = {
         "t": t,
@@ -382,6 +409,7 @@ def plan_trajectory(start_state, goal_state, environment, config):
         "u": u_opt.T,
         "success": stats["success"],
         "return_status": stats["return_status"],
+        "_decision_variables": np.asarray(sol['x'].full()).reshape(-1),
     }
     if footprint_model == "three_circle":
         result["astar_path"] = astar_path.copy()  # geometric warm start, useful for debugging
@@ -391,3 +419,99 @@ def plan_trajectory(start_state, goal_state, environment, config):
     return result
 
 
+
+
+def plan_trajectory(start_state, goal_state, environment, config):
+    """Solve the existing NLP, optionally certifying and repairing clearance.
+
+    New behavior is explicitly opt-in via `continuous_clearance=True`.
+    Requires three_circle and a finite rate limit for path_tangent yaw.
+    A failed numerical solve or exhausted certificate is NOT a proof of
+    geometric infeasibility, so this function never invents that status.
+    """
+    enabled = bool(config.get("continuous_clearance", False))
+    if not enabled:
+        result = _solve_collocation_once(start_state, goal_state, environment, config)
+        result.pop("_decision_variables", None)
+        return result
+
+    from planning.continuous_clearance import verify_continuous_clearance
+
+    if config.get("footprint_model") != "three_circle":
+        raise ValueError("continuous_clearance requires footprint_model='three_circle'")
+    yaw_mode = config.get("footprint_yaw_mode", "path_tangent")
+    limit = config.get("footprint_max_yaw_rate")
+    if yaw_mode == "path_tangent" and (
+        limit is None or not np.isfinite(limit) or limit <= 0
+    ):
+        raise ValueError("Certification requires footprint_max_yaw_rate > 0")
+    if yaw_mode not in ("fixed", "path_tangent"):
+        raise ValueError("Unsupported yaw mode for certification")
+
+    max_repairs = config.get("clearance_max_repairs", 4)
+    if not isinstance(max_repairs, int) or max_repairs < 0:
+        raise ValueError("clearance_max_repairs must be a nonnegative integer")
+    repair_padding = float(config.get("clearance_repair_padding_m", 0.002))
+    if not np.isfinite(repair_padding) or repair_padding < 0:
+        raise ValueError("clearance_repair_padding_m must be finite and nonnegative")
+    max_depth = config.get("clearance_max_depth", 17)
+    repair_times = []
+    warm_start = None
+    history = []
+
+    for attempt in range(max_repairs + 1):
+        try:
+            result = _solve_collocation_once(
+                start_state, goal_state, environment, config,
+                repair_times=repair_times,
+                repair_clearance_m=repair_padding, warm_start=warm_start,
+            )
+        except _CollocationSolverError as exc:
+            return {"success": False, "planning_status": "solver_failed",
+                    "return_status": str(exc), "repair_attempts": attempt,
+                    "repair_history": history}
+        except RuntimeError as exc:
+            # A* initialization or another planning-stage runtime failure.
+            # Neither outcome establishes infeasibility.
+            return {"success": False, "planning_status": "planning_failed",
+                    "return_status": str(exc), "repair_attempts": attempt,
+                    "repair_history": history}
+
+        warm_start = result.pop("_decision_variables")
+        if not result["success"]:
+            result.update(success=False, planning_status="solver_failed",
+                          repair_attempts=attempt, repair_history=history)
+            return result
+
+        certificate = verify_continuous_clearance(
+            result, environment, config, max_depth=max_depth,
+        )
+        history.append({"attempt": attempt, "certificate": certificate,
+                        "constraint_times_s": list(repair_times)})
+        result.update(
+            certification=certificate,
+            repair_attempts=attempt,
+            repair_history=history,
+        )
+        if certificate["certified"]:
+            result["planning_status"] = "success"
+            return result
+
+        if attempt == max_repairs:
+            result.update(success=False, planning_status="uncertified")
+            return result
+        # Add constraints at newly detected collision or uncertain locations.
+        # Do not repeatedly re-add the same time; leave an explicit failure
+        # status if refinement makes no progress.
+        new_times = []
+        for finding in certificate["findings"]:
+            time_s = float(finding["time_s"])
+            if (np.isfinite(time_s) and
+                    all(abs(time_s - t) > 1e-6 for t in repair_times + new_times)):
+                new_times.append(time_s)
+        if not new_times:
+            result.update(success=False, planning_status="uncertified")
+            return result
+        repair_times = sorted(repair_times + new_times)
+
+    raise AssertionError("Unreachable finite repair loop")
