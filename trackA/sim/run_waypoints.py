@@ -48,6 +48,18 @@ JITTER_XY = 0.10                # [m]   spawn offset drawn uniformly in +-JITTER
 JITTER_YAW = np.deg2rad(15.0)   # [rad] spawn yaw drawn uniformly in +-JITTER_YAW (when seeded)
 
 
+def acquire_build_lock():
+    """Let one process at a time write the scene and build the acados solvers, so runs can go in parallel.
+
+    Returns the open lock file; the lock ends when it is closed or the process exits.
+    """
+    import fcntl
+    import tempfile
+    handle = open(Path(tempfile.gettempdir()) / "meam5170_acados_build.lock", "w")
+    fcntl.flock(handle, fcntl.LOCK_EX)
+    return handle
+
+
 def spawn_with_jitter(env, seed):
     """Reset to keyframe 0, then shift the base by a seeded random (dx, dy) and rotate it by a random yaw.
 
@@ -197,12 +209,17 @@ def foot_slopes(course: Course, feet_pos) -> np.ndarray:
 def run(course_path: str, path_kind: str = "straight", v_ref: float = 0.4, timeout: float = 60.0,
         render: bool = True, log_dir: str = "data/run_waypoints", plot: bool = False,
         mpc_kind: str = "upstream", walls=None, mu_feet=None, seed=None, tag: str | None = None,
-        slope_cone: bool = True) -> dict:
+        slope_cone: bool = True, follower_factory=None, push=None) -> dict:
     """mpc_kind 'perfoot' uses controllers.centroidal_nmpc_nominal_1_4 (step 1.4); walls are CoM half-spaces
     [a_x, a_y, b] (a_x x + a_y y <= b, world frame) and mu_feet the friction of FL, FR, RL, RR.
     slope_cone (perfoot only): build each foot's friction cone on the terrain slope under it; False keeps the
     world-vertical cone (the behavior before the slope fix), for comparison.
     seed: jitter the spawn pose (see spawn_with_jitter). tag: log file name stem (default scene_path_timestamp).
+    follower_factory(spawn_xy, spawn_yaw): builds the velocity-command source instead of PathFollower. It must have
+    update(pos_xy, vel_xy, yaw, dt) -> (lin_vel, ang_vel, done), waypoints, seg_idx and cross_track_error; extra log
+    channels come from its optional log_keys and log_row().
+    push: list of (t_start, t_end, a_x, a_y), or a callable t -> (a_x, a_y): horizontal force on the base of
+    robot mass * a [m/s^2].
     Returns the summary dict, with 'log' set to the path of the saved .npz."""
     course_cfg = yaml.safe_load(open(course_path))
     scene = course_cfg["name"]
@@ -214,6 +231,7 @@ def run(course_path: str, path_kind: str = "straight", v_ref: float = 0.4, timeo
         raise RuntimeError("run_waypoints.py has no heightmaps; set visual_foothold_adaptation to 'blind'")
     sim_dt = cfg.simulation_params["dt"]
 
+    build_lock = acquire_build_lock()
     env = QuadrupedEnv(
         robot=cfg.robot,
         scene=scene,
@@ -236,8 +254,12 @@ def run(course_path: str, path_kind: str = "straight", v_ref: float = 0.4, timeo
     if np.linalg.norm(spawn_xy - np.asarray(start)) > 0.2:
         print(f"warning: robot spawned at {spawn_xy}, course start is {start}")
 
-    waypoints = make_waypoints(path_kind, start, goal)
-    follower = PathFollower(waypoints, v_ref=v_ref)
+    if follower_factory is None:
+        waypoints = make_waypoints(path_kind, start, goal)
+        follower = PathFollower(waypoints, v_ref=v_ref)
+    else:
+        follower = follower_factory(spawn_xy.copy(), float(env.base_ori_euler_xyz[2]))
+        waypoints = np.asarray(follower.waypoints, dtype=float)
     course = Course(course_cfg["course"])   # surface height z(x), so the path is drawn on ramps too
     path_geom_ids = {}
 
@@ -280,6 +302,8 @@ def run(course_path: str, path_kind: str = "straight", v_ref: float = 0.4, timeo
     elif walls or mu_feet is not None or not slope_cone:
         raise ValueError("--wall, --mu and --flat-cone need --mpc perfoot")
 
+    build_lock.close()              # scene and solvers are built
+
     solves = SolveRecorder(wrapper.srbd_controller_interface.controller, env)
     contact_logger = ContactLogger(env)
     barrier_ids = contact_logger.barrier          # geom id -> name of every wall_ / obstacle_ geom
@@ -290,6 +314,10 @@ def run(course_path: str, path_kind: str = "straight", v_ref: float = 0.4, timeo
                            "cross_track_error", "seg_idx",
                            "com_pos", "rpy", "base_ang_vel", "feet_pos", "feet_vel", "feet_contact", "feet_grf",
                            "mpc_grf")}
+    extra_log_keys = tuple(getattr(follower, "log_keys", ()))
+    log.update({k: [] for k in extra_log_keys})
+    base_body_id = env.mjModel.body("base").id
+    robot_mass = float(env.mjModel.body_subtreemass[base_body_id])
     outcome = "timeout"
     info = {}
     last_render_time = time.time()
@@ -306,7 +334,15 @@ def run(course_path: str, path_kind: str = "straight", v_ref: float = 0.4, timeo
         com_pos = copy.deepcopy(env.com)
 
         # Reference conversion: replaces `env.target_base_vel()` from the upstream loop ------------------
-        ref_base_lin_vel, ref_base_ang_vel, done = follower.update(base_pos[:2], base_ori_euler_xyz[2], sim_dt)
+        if follower_factory is None:
+            ref_base_lin_vel, ref_base_ang_vel, done = follower.update(base_pos[:2], base_ori_euler_xyz[2], sim_dt)
+        else:
+            ref_base_lin_vel, ref_base_ang_vel, done = follower.update(base_pos[:2], base_lin_vel[:2],
+                                                                       base_ori_euler_xyz[2], sim_dt)
+        if extra_log_keys:
+            row = follower.log_row()
+            for k in extra_log_keys:
+                log[k].append(np.array(row[k]))
 
         log["t"].append(env.simulation_time)
         log["base_pos"].append(base_pos.copy())
@@ -363,6 +399,11 @@ def run(course_path: str, path_kind: str = "straight", v_ref: float = 0.4, timeo
         action = np.zeros(env.mjModel.nu)
         for leg in LEGS_ORDER:
             action[env.legs_tau_idx[leg]] = tau[leg]
+        if push:
+            now = float(env.simulation_time)
+            a_push = np.asarray(push(now), dtype=float) if callable(push) else \
+                sum((np.array([ax, ay]) for t0, t1, ax, ay in push if t0 <= now < t1), np.zeros(2))
+            env.mjData.xfrc_applied[base_body_id, :3] = [robot_mass * a_push[0], robot_mass * a_push[1], 0.0]
         _, _, is_terminated, _, info = env.step(action=action)
         contact_logger.record(env)
         for barrier, body, pen in barrier_contacts(env, barrier_ids):
@@ -410,6 +451,7 @@ def run(course_path: str, path_kind: str = "straight", v_ref: float = 0.4, timeo
         final_dist_to_goal=float(np.linalg.norm(final_xy - np.asarray(goal))),
         max_abs_cross_track=float(np.max(np.abs(e))),
         rms_cross_track=float(np.sqrt(np.mean(e ** 2))),
+        wall_contact_steps=len(wall_hits),
     )
     for k, (ax, ay, b) in enumerate(walls or []):  # how far the CoM got past each wall (> 0 means it crossed)
         a = np.array([ax, ay])

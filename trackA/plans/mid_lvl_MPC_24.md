@@ -4,27 +4,35 @@
 
 ## Team summary
 
-**Status:** Jacob can build and test the mid layer on today's `master` without waiting on anyone. A full ramp-and-obstacle test run already reaches the goal using temporary patches.
+**Status (Nov 22):** The mid layer (QP + LQR) is built and runs full ramp-and-obstacle courses on today's `master`, using temporary patches and a wide-gap test course. It reached the goal in **10 of 10** seeded runs with **2.9 cm** maximum tracking error and no contact.
+
+**Main open problem:** the tube assumes the robot can reject a 1.96 m/s² shortfall. In simulation it handled sideways pushes of **1.0 m/s² (5 of 5 runs, inside the tube)**, but **fell in 2 of 5 runs at 1.25 m/s²**.
+
+**Footprint (Jacob's decision):** the global planner and the mid-layer MPC will both use **three circles by default**. With the full tube, this lowers the smallest passable opening from 1.49 m to about **1.06 m**. Narrower gaps should return "no feasible plan" unless task 2.5 shrinks the tube.
 
 **Needed from Austin and Ben by Wed Nov 25,** so validation can finish before M2 on Nov 27.
 
 ### TODO by person
 
-**Jacob (starting now, needs nothing from anyone)**
-1. Build a temporary planner adapter and a wide-gap test course (one 0.483 m circle plus tube)
-2. Run step tests to measure the velocity lag `τ` and gain `K_sys`
-3. Build LQR tracking, then add the nominal QP
-4. Integrate into `run_waypoints` and run full courses
-5. Inject worst-case pushes, check the robot stays in the tube, and save logs for task 2.5
+**Jacob**
+1. ~~Temporary planner adapter and wide-gap test course~~ Done
+2. ~~Step tests for velocity lag `τ` and gain `K`~~ Done
+3. ~~LQR tracking and nominal QP~~ Done
+4. ~~`run_waypoints` integration and full-course runs~~ Done
+5. ~~Push tests and logs for task 2.5~~ Done
+6. **Switch the MPC and planner call to three circles** (J8), then rerun the full-course tests
+7. Improve recovery on the ramp, then integrate teammates' work when it lands
 
 **Austin (by Nov 25)**
-1. Fix the A* seed: it rejects robust gaps of 1.2 m or less that the NLP can solve (seeding pass 2 from pass 1 worked for 1.05 to 1.2 m)
-2. Return "no feasible plan" instead of raising an exception
-3. Make plans valid between samples (they currently cut into the inflated constraints by 0.8 to 2.9 cm)
-4. Keep `h` a multiple of 0.1 s and choose `T` by searching for the shortest feasible time
-5. Start `yaw_ref` at the measured yaw and limit its rate to 0.5 rad/s
-6. Add the friction reserve `δ`, uphill and turn limits, and heading-error inflation
-7. Run the disturbance check (2.5) on Jacob's logs
+1. **Make three circles the default:** change `footprint_model` to `"three_circle"` in `plan_trajectory` and the `test_planner.py` CLI, and keep `"single_circle"` as an explicit option. All 56 planning tests still pass with the `plan_trajectory` default changed
+2. Fix the A* seed: it rejects robust gaps of 1.2 m or less that the NLP can solve (seeding pass 2 from pass 1 worked for 1.05 to 1.2 m)
+3. Return "no feasible plan" instead of raising an exception
+4. Make plans valid between samples (they currently cut into the inflated constraints by 0.8 to 2.9 cm)
+5. Keep `h` a multiple of 0.1 s and choose `T` by searching for the shortest feasible time
+6. **Add a per-section speed limit:** at `μ_lo = 0.3` the robot saturates near 0.24 m/s on the ramp, so plans should use about 0.18 m/s there and can go faster on the flats
+7. **Make the rate-limited `yaw_ref` the default:** start at the measured yaw and limit its rate to 0.5 rad/s (`footprint_yaw` and `footprint_max_yaw_rate` already exist)
+8. Add the friction reserve `δ`, uphill and turn limits, and heading-error inflation
+9. Run the disturbance check (2.5) on Jacob's logs
 
 **Ben (by Nov 25)**
 1. Move courses to the new frame and discrete friction set (2.3a, 2.3b)
@@ -37,8 +45,9 @@
 
 | Who | Decision | Recommendation (used until decided) |
 |---|---|---|
-| **Jacob + Austin** | Replace B3's `v_cmd = v_meas + dt·a_cmd`? | Yes, if the step test confirms the lag. In simulation, slip error was 79 cm with B3 and 10.7 cm with the lag-based conversion |
-| **Jacob + Austin** | Keep the gait-cycle filter on `v_meas`? | No, it adds about 0.36 s of delay. Use raw, or a 1.4 Hz notch if needed |
+| **Jacob + Austin** | Replace B3's `v_cmd = v_meas + dt·a_cmd`? | Yes. In full runs, error was 2.9 cm with the measured-lag conversion and 19.5 cm with B3. At a 1.0 m/s² push: 22.6 cm (inside the tube) vs 47 cm (outside). Caveat: B3 did not fall at 1.25 m/s², but left the tube by up to 2.4× |
+| **Jacob + Austin** | What disturbance does the tube claim to cover? | Keep 1.96 m/s² for planning for now, but state that only 1.0 m/s² is demonstrated until recovery improves or 2.5 shows the real shortfall is smaller |
+| **Jacob + Austin** | Keep the gait-cycle filter on `v_meas`? | No, it adds about 0.36 s of delay. Full runs used raw `v_meas` and tracked to 2.9 cm without pushes |
 | **Jacob + Austin** | Acceleration limits | `‖a‖ ≤ (μ_plan − δ)g`, with turn and uphill limits from `μ_lo` |
 | **Jacob + Austin** | Heading-error allowance `ε_ψ` | 0.10 rad until 2.5 measures it |
 | **Austin + Ben** | Who writes `predict_contacts`? | Austin. A constant version is enough for stage 2 |
@@ -47,7 +56,7 @@
 
 ### After Austin and Ben finish (Jacob)
 
-1. Switch to Austin's three-circle, two-pass planner and `yaw_ref`
+1. Replace the adapter's explicit three-circle settings with Austin's three-circle default, two-pass planner, and `yaw_ref`
 2. Switch to Ben's courses, frame, converter, and batch runner
 3. Apply the decisions above and rerun the mid-layer tests
 4. Run end-to-end stage 2 (2.6), then validate with Austin (2.7)
@@ -55,6 +64,50 @@
 ---
 
 # Detailed plan
+
+## 0. Implementation status (Nov 22)
+
+Built without changes to Track B or Track C code. Nothing is committed yet.
+
+| Piece | File |
+|---|---|
+| Mid-layer controller, QP, LQR, tube, reference, planner adapter | `trackA/mid_layer/` |
+| One full run | `python -m trackA.sim.run_midlayer --controller tube` |
+| Batch comparison | `python -m trackA.sim.compare_midlayer` |
+| Step test and ramp speed test | `trackA/sim/step_test.py`, `trackA/sim/ramp_speed_test.py` |
+| Test courses | `trackA/courses/` |
+| Results | `trackA/results/mid_layer/summary.md`, `trackA/results/step_test/` |
+| Runner hooks (default behavior unchanged) | `trackA/sim/run_waypoints.py` |
+
+**Measured response of Quadruped-PyMPC** (`v̇ = (K·v_cmd − v)/τ`, cones at 0.3):
+
+| Axis | `τ` | `K` |
+|---|---|---|
+| Forward, flat | 0.085 s | 0.885 |
+| Lateral, flat | 0.10 s | 0.707 (0.62 at 0.1 m/s to 0.77 at 0.3 m/s) |
+| Yaw rate | At or below the 0.02 s fit resolution | 0.867 |
+| Forward, 10° ramp | Not fitted (flat value used) | 0.62, saturating near 0.24 m/s |
+
+**Full-course results** on `midlayer_test_v1` (1.7 m openings, one circle plus tube):
+
+| Controller | Push | Reached goal | Worst error | Inside tube |
+|---|---|---|---|---|
+| LQR | None | 10/10 | 2.9 cm | 10/10 |
+| LQR + QP | None | 10/10 | 2.9 cm | 10/10 |
+| LQR, B3 conversion | None | 5/5 | 19.5 cm | 5/5 |
+| LQR | 1.0 m/s² | 5/5 | 22.6 cm | 5/5 |
+| LQR + QP | 1.0 m/s² | 5/5 | 22.6 cm | 5/5 |
+| LQR, B3 conversion | 1.0 m/s² | 5/5 | 47.0 cm | 0/5 |
+| LQR | 1.25 m/s² | **3/5** | 143 cm | 1/5 |
+| LQR + QP | 1.25 m/s² | **3/5** | 150 cm | 1/5 |
+| LQR, B3 conversion | 1.25 m/s² | 5/5 | 63.6 cm | 0/5 |
+
+- The QP never failed or used slack above 1 mm in 12,804 solves. Its worst solve took 10.5 ms.
+- **On a valid plan the QP matches LQR**, as expected: it is not yet improving tracking.
+- Both falls happened 2 to 4 s after the ramp-barrier push began, on the 0.3 friction patch. Scaling LQR commands to the friction budget made recovery worse, so that change was removed.
+- The `PathFollower` baseline reached the goal 10/10 without pushes, in 42.5 s versus 66.9 s for the mid layer. The mid layer is slower because one speed limit, set by the ramp, currently applies to the whole course.
+
+**Next for Jacob:** switch to three circles (J8), then improve ramp recovery, for example with a dedicated ramp step test and ramp-specific lateral gains.
 
 ## 1. What Jacob can do now
 
@@ -64,12 +117,13 @@ These use the current repo and do not edit Austin's or Ben's code.
 
 | Missing today | Patch for now | Replaced by |
 |---|---|---|
-| Working robust three-circle plan | `footprint_model="single_circle"`, `r_safety=0.10` (radius 0.483 m) | Austin's two-pass planner |
+| Robust three-circle plan | Built today: `footprint_model="single_circle"`, `r_safety=0.10` (radius 0.483 m). **Next (J8):** pass the three-circle settings explicitly | Austin's three-circle default and two-pass planner |
 | Two-pass tube inflation | One pass with `tube_position_margin_m = 0.263`, because the tube is constant before learning | `plan_two_pass_friction_tube` |
 | `predict_contacts` | Compute the constant tube directly with `compute_friction_tube_position_radii` | Shared predictor |
-| `yaw_ref` in single-circle mode | Heading between planner knots, indexed by nominal time, held on steps under 2 cm, limited to 0.5 rad/s | Austin's `yaw_ref` |
+| `yaw_ref` in single-circle mode | Heading between planner knots, indexed by nominal time, held on steps under 2 cm, limited to 0.5 rad/s | The planner's returned `yaw_ref` (J8) |
 | Acceleration limits | `env.friction_mu = 0.12`, which limits `‖a_ref‖` to 1.18 m/s² and covers the ramp | Planner limits |
-| Time search | `T` = route length / 0.30 m/s, rounded up to a multiple of 0.4 s; add 4 s and retry on failure | Austin's search |
+| Time search | `T` = route length / 0.30 m/s (0.15 m/s with a ramp), rounded up to a multiple of 0.4 s; add 4 s and retry on failure | Austin's search |
+| Per-section speed limit | One limit for the whole course: 0.18 m/s if it has a ramp, otherwise 0.5 m/s | Austin's limits |
 | Between-sample validity | Check the plan every 0.02 s; if it violates, raise `r_safety` by the shortfall plus 1 cm and replan | Planner check |
 | "No feasible plan" | Catch planner exceptions in the adapter and return a status | Planner status |
 | YAML-to-planner converter | Read bounds and obstacles from the course file, in whatever frame it uses | Ben's converter |
@@ -85,7 +139,7 @@ These use the current repo and do not edit Austin's or Ben's code.
 - Gateway, mid-ramp barrier, and top passage, each with a **1.7 m opening**
 - Start `(0, 0)`, goal `(10.2, 0)`
 
-One circle plus the tube needs an opening of `2(0.483 + 0.263) = 1.49 m`. So this course **cannot test the real 0.6 to 1.1 m gaps**. Those wait for Austin's three-circle planner.
+One circle plus the tube needs an opening of `2(0.483 + 0.263) = 1.49 m`. Three circles need `2(0.194 + 0.05 + 0.263 + 0.023) = 1.06 m`. This course **does not test that limit yet**. Openings of 1.2 m or less also wait for Austin's A* fix, and openings below about 1.06 m should return "no feasible plan" at the full tube.
 
 ### Jacob's work order
 
@@ -96,14 +150,39 @@ One circle plus the tube needs an opening of `2(0.483 + 0.263) = 1.49 m`. So thi
 | **J3. Core and unit tests** | Nov 23 | Reference, tube, LQR, conversion, yaw loop | Unit tests pass |
 | **J4. LQR tracking** | Nov 23 | QP off, nominal equals planner reference | 10 of 10 seeded full runs reach the goal with no contact |
 | **J5. Nominal QP** | Nov 23 to 24 | Offline against saved plans, then in the loop | Returns a valid reference to within 1 mm, p99 under 50 ms, no slack above 1 mm, no worse than J4 |
-| **J6. Disturbance test** | Nov 24 | Apply a horizontal force of `m × 1.96 m/s²` to the base in timed windows | `‖e‖_P ≤ α`, no contact, logs saved for 2.5 |
+| **J6. Disturbance test** | Nov 24 | Apply a horizontal force of `m × 1.96 m/s²` to the base in timed windows | `‖e‖_P ≤ α`, no contact, logs saved for 2.5. **Not met yet:** passes at 1.0 m/s², falls in 2 of 5 runs at 1.25 m/s² |
 | **J7. Comparison** | Nov 24 | `PathFollower`, LQR, and LQR + QP on the same seeds | Summary table in `trackA/results/` |
+| **J8. Three circles** | Nov 23 | Switch the planner call and QP to three circles, then rerun J4 to J7 | 10 of 10 no-push runs with no contact; QP returns the valid reference; all three circles clear the inflated constraints on a 0.02 s check |
 
 **Fallback:** if time runs short, J4 (planner plus LQR) is a complete controller. When the planner's reference is valid, it has the same stage 2 guarantee as the QP version.
 
+### Three-circle footprint (J8)
+
+**Decision:** the planner and MPC both use three circles by default. One circle stays available as an explicit option for comparison.
+
+```
+s_m   = {-L/3, 0, +L/3} = {-0.233, 0, +0.233} m
+r     = hypot(L/6, W/2) + r_safety = 0.194 + 0.05 = 0.244 m
+c̄_m,k = p̄_k + s_m [cos ψ_ref,k, sin ψ_ref,k]ᵀ
+R_m,k = r + r_tube,k + |s_m|·ε_ψ
+```
+
+The MPC stays a QP because `ψ_ref` is known before the solve, so each circle center is linear in `p̄_k`. The planner and MPC must use the same `ψ_ref`.
+
+| File | Change |
+|---|---|
+| `planner_adapter.py` | Pass `footprint_model="three_circle"`, `footprint_yaw_mode="path_tangent"`, `footprint_yaw=<measured yaw>`, `footprint_max_yaw_rate=0.5`, and `r_safety=0.05`. Use `tube_position_margin_m = r_tube + 0.233·ε_ψ` until Austin adds the heading term. Use the returned `yaw_ref`, and check all three circles every 0.02 s |
+| `controller.py`, `nominal_qp.py` | Pass the three offsets and the radius to the QP. Add `abs(s_m)·ε_ψ` to each circle's wall and obstacle margin |
+| `config.py` | Add the footprint model and `ε_ψ`, and use `r_safety = 0.05` for three circles |
+| `test_mid_layer.py` | Test circle placement, margins at several yaws, and that the QP returns a valid three-circle plan |
+
+Test on the 1.7 m course first, then on a 1.25 m version. Openings of 1.2 m or less need Austin's A* fix.
+
+**Checked Nov 22:** with these settings, `master`'s planner solved `midlayer_test_v1` (`T = 68 s`) with 1.2 cm of slack to the inflated three-circle constraints on a 0.02 s grid and a peak yaw rate of 0.30 rad/s. This was a planner-only check. The three-circle MPC is not built or run in simulation yet.
+
 ### What cannot be finished without teammates
 
-- Passing the real 0.6 to 1.1 m gaps
+- Passing openings of 1.2 m or less, until Austin's A* fix lands
 - Final courses, batch runs, and metrics
 - Task 2.5 sign-off on `r_w`, `r_0`, and the opening widths
 - Changing closed team decisions
@@ -158,11 +237,11 @@ Use the `perfoot` MPC with `set_friction(μ_lo)`. The tube is applied in the mid
 
 ### Parameters
 
-| Symbol | Now (one circle) | After Austin (three circles) |
+| Symbol | Now (one circle) | After J8 (three circles, the default) |
 |---|---|---|
 | Circle offsets `s_m` | `{0}` | `{-0.233, 0, +0.233}` m |
 | Circle radius plus margin | 0.483 m | `0.194 + 0.05` m |
-| Tube radius | 0.263 m | From the route |
+| Tube radius | 0.263 m | 0.263 m, then from the route after Austin's two-pass planner |
 | Minimum opening | 1.49 m | About 1.06 m with the heading term |
 
 | Symbol | Value | Source |
@@ -170,12 +249,15 @@ Use the `perfoot` MPC with `set_friction(μ_lo)`. The tube is applied in the mid
 | `K` per axis | `[-18.45, -7.63]` | `design_tube_error_model(0.02)` |
 | `ρ` | 0.974 | Same |
 | `μ_plan`, `μ_lo`, `δ` | 0.5, 0.3, 0.05 | B2, B4 |
-| `τ_v`, `K_sys,v` | 0.10 s, 0.87 | *Provisional until J2* |
-| `τ_ω`, `K_sys,ω` | 0.05 s, 0.95 | *Provisional until J2* |
-| `τ_eff` | 0.110 s | `Δt / (1 − exp(−Δt/τ_v))` |
-| `v_max` | 0.5 m/s | Must match the planner |
+| `τ`, `K` forward (flat) | 0.085 s, 0.885 | Step test |
+| `τ`, `K` lateral | 0.10 s, 0.707 | Step test |
+| `K` forward (ramp) | 0.62 | Ramp speed test |
+| `K` yaw rate | 0.867 | Step test |
+| `τ_eff` | `Δt / (1 − exp(−Δt/τ))` per axis | Exact inverse over a held step |
+| `v_max` | 0.5 m/s flat, 0.18 m/s with a ramp | Ramp speed test |
+| Command limits | 0.8 m/s forward, 0.45 m/s on the ramp, 0.4 m/s lateral | Measured response |
 | `ω_max`, `k_ψ` | 0.6 rad/s, 1.5 1/s | `PathFollower` |
-| `ε_ψ` | 0.10 rad | *Placeholder*, unused with one circle |
+| `ε_ψ` | 0.10 rad | *Placeholder* until 2.5 measures it. Used from J8 |
 
 ### Nominal QP
 
@@ -237,11 +319,11 @@ Every 0.02 s:
 ```
 e     = x_meas − x̄(t)
 a_cmd = ā(t) + K e
-v_cmd = (τ_eff · a_cmd + v_meas) / K_sys,v
-ω_cmd = clip( ω_ref(t)/K_sys,ω + k_ψ · wrap(ψ_ref(t) − ψ_meas),  ±ω_max )
+v_cmd,i = (τ_eff,i · a_cmd,i + v_meas,i) / K_i       for i = forward, lateral (body frame)
+ω_cmd = clip( ω_ref(t)/K_ω + k_ψ · wrap(ψ_ref(t) − ψ_meas),  ±ω_max )
 ```
 
-`K` already contains the minus sign, so the error must be **measured minus nominal, at the current time**. Keep B3's conversion behind a config flag until the team decides.
+`K` in the LQR line already contains the minus sign, so the error must be **measured minus nominal, at the current time**. The conversion works in the body frame because the robot responds differently forward and sideways, then rotates back to the world frame. B3's conversion stays available with `--conversion b3`.
 
 ### Control loop
 
@@ -259,7 +341,8 @@ After the plan ends, hold the nominal at the goal with `ā = 0`. Report `done` w
 
 | Event | Response | Logged as |
 |---|---|---|
-| QP fails or exceeds 100 ms | Keep the previous plan, shifted one stage | `qp_fallback` |
+| QP fails | Keep the previous plan, shifted one stage | `mid_qp_fallback` |
+| QP exceeds 100 ms | Use the result (simulation waits for it), and log it | `mid_qp_overrun` |
 | Slack above 1 mm | Continue, mark the guarantee void | `qp_slack_max` |
 | `‖e‖_P > α` | Continue, counts against the stage 2 exit | `tube_violation` |
 | `v_cmd` clipped | Continue | `cmd_saturated` |
@@ -287,7 +370,7 @@ In `trackA/sim/run_waypoints.py`, add a controller option, a planner path source
 
 | Trigger | Jacob's next step | Check |
 |---|---|---|
-| **Austin's planner fixes land** | Replace the adapter's patches with `plan_two_pass_friction_tube` and `yaw_ref`; turn on three circles | J4 to J6 pass on a gap near 1.1 m |
+| **Austin's planner fixes land** | Replace the adapter's patches, including its explicit three-circle settings, with Austin's default and `plan_two_pass_friction_tube` | J4 to J6 pass on a gap near 1.1 m |
 | **Ben's frame and courses land** | Use his converter, start poses, and `mixed_v1` | Same seeds still reach the goal |
 | **Decisions made** | Set the conversion, filter, limits, and `ε_ψ` flags | J6 rerun |
 | **Batch runner lands** | Connect the `robust` controller slot | 2 gaps × 3 seeds dry run |
@@ -298,7 +381,7 @@ In `trackA/sim/run_waypoints.py`, add a controller option, a planner path source
 
 ## 4. Repo status
 
-**On `master` from Austin:** LQR error model; friction tube with radii in meters; three-circle footprint; `yaw_ref` in three-circle mode; footprint-aware A*; two-pass planner.
+**On `master` from Austin:** LQR error model; friction tube with radii in meters; three-circle footprint (optional, the default is still one circle); `yaw_ref` in three-circle mode; footprint-aware A*; two-pass planner.
 
 **On other branches:** none of Austin's branches have unmerged commits. The only remote branch ahead of `master` is Ben's `docs/claude-context` (one commit, docs only). Local work and PRs from forks are not visible here.
 
@@ -311,4 +394,5 @@ All checked on `master` at `ca7889a`.
 - **Wall clearance:** with the robust margin, the three-circle A* failed for a start 0.5 m from a wall and for a goal 0.61 m from a wall. It succeeded at 0.75 m.
 - **Between samples:** master's three-circle plans violated the inflated constraints by 0.8 cm at walking speed and 2.9 cm at the default `T = 12`, checked every 0.02 s with interpolated yaw.
 - **QP prototype** (`Δt = 0.1`, `N = 20`, 30 s plan): 320 solves, none failed. Median 4.3 ms, p99 29 ms, worst 212 ms, so the fallback is required. It omitted the turn and uphill limits and the two-endpoint face rule.
-- **Conversion comparison (79 cm vs 10.7 cm)** uses an idealized double integrator with first-order lag and the provisional `τ = 0.1`, `K_sys = 0.87`. The step test decides whether B3 changes.
+- **Conversion comparison:** the MuJoCo full-course results in section 0 replace the earlier idealized estimate.
+- **Limits of the full-course results:** they use one test course with 1.7 m openings, one circle, and external pushes as a stand-in for friction shortfall. They do not validate the real 0.6 to 1.1 m gaps or the final courses.
