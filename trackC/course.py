@@ -1,16 +1,19 @@
 """Course geometry: the flat -> ramp -> flat profile from the parameter sheet (v0.3).
 
-Coordinates are plan view: x runs along the course (start to goal), y runs across it, z is up.
-The robot spawns at the origin, so the lower flat starts a little behind x = 0 (the back-wall margin).
+World frame (decision A1), shared by every module: the origin is the back-right inner wall corner on the
+lower-flat surface. x runs forward along the course (horizontal distance, also on the ramp), y to the left, z up.
+So the inner wall faces are x = 0 (back), x = x3 (end), y = 0 (right) and y = width (left), and the robot starts
+wherever the course file's `start` says, not at the origin.
 
-    z
-    ^                                     upper flat (z = H)
-    |                            x2 ___________________ x3
-    |                             /
-    |                   ramp    /   slope angle theta
-    |                         /
-    |  lower flat (z = 0)    /
-    +---x0 ------------- x1 ------------------------------------> x
+    side profile                                                      plan view (from above)
+    z                                                                 y
+    ^                                     upper flat (z = H)          ^  left wall, y = width
+    |                            x2 ___________________ x3            |  +----------------------------+
+    |                             /                                   |  |  start ->            goal  |
+    |                   ramp    /   slope angle theta                 |  +----------------------------+
+    |                         /                                       |  right wall, y = 0
+    |  lower flat (z = 0)    /                                        +--x0 = 0 -------------- x3 --> x
+    +---x0 = 0 --------- x1 ------------------------------------> x
 
 Every point on the course belongs to exactly one SECTION. Each section is a plane, so a friction region drawn in
 plan view is "lifted" onto the course by giving each of its vertices the height z(x) of the section it lies in.
@@ -18,6 +21,8 @@ A region that crosses x1 or x2 (a crease) is cut there, and each piece is lifted
 """
 import math
 from dataclasses import dataclass
+
+import numpy as np
 
 from shapely.geometry import box
 
@@ -31,9 +36,14 @@ class Section:
 
 class Course:
     def __init__(self, c: dict):
+        if "start" in c["lower_flat"]:
+            raise ValueError("lower_flat.start is from the old spawn-at-origin frame; the course now always begins at "
+                             "x = 0 (decision A1). Remove it and shift start, goal, regions and obstacles instead.")
         self.width = c["width"]
         self.theta = math.radians(c["ramp"]["angle_deg"])
-        self.x0 = c["lower_flat"]["start"]
+        self.x0 = 0.0                       # back wall face
+        self.y0, self.y1 = 0.0, self.width  # right and left wall faces
+        self.yc = self.width / 2            # centerline
         self.x1 = self.x0 + c["lower_flat"]["length"]
         run = c["ramp"]["length_along_slope"] * math.cos(self.theta)     # horizontal run of the ramp
         self.H = c["ramp"]["length_along_slope"] * math.sin(self.theta)  # height gained by the ramp
@@ -61,12 +71,19 @@ class Course:
     # ---- plan-view shapes ---------------------------------------------------------------------------------------
     def section_rect(self, s: Section):
         """The plan-view rectangle covered by one section (a shapely polygon)."""
-        return box(s.xa, -self.width / 2, s.xb, self.width / 2)
+        return box(s.xa, self.y0, s.xb, self.y1)
 
     def course_rect(self):
-        return box(self.x0, -self.width / 2, self.x3, self.width / 2)
+        return box(self.x0, self.y0, self.x3, self.y1)
+
+    def wall_clearance(self, x, y):
+        """Plan-view distance from (x, y) to the nearest inner wall face; negative means past that face.
+
+        Works on scalars or numpy arrays of equal shape."""
+        x, y = np.asarray(x, float), np.asarray(y, float)
+        return np.minimum.reduce([x - self.x0, self.x3 - x, y - self.y0, self.y1 - y])
 
     def summary(self) -> str:
         return (f"lower flat x [{self.x0:.2f}, {self.x1:.2f}] | ramp x [{self.x1:.2f}, {self.x2:.2f}] "
                 f"rising {self.H:.3f} m at {math.degrees(self.theta):.1f} deg | "
-                f"upper flat x [{self.x2:.2f}, {self.x3:.2f}] | width {self.width} m")
+                f"upper flat x [{self.x2:.2f}, {self.x3:.2f}] | y [{self.y0:.2f}, {self.y1:.2f}]")

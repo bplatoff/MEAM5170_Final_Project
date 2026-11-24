@@ -36,7 +36,7 @@ from trackC.course import Course
 TILE_DEPTH = 0.05   # [m] tiles are prisms extruded this far below the surface
 
 HEADER = """<mujoco model="{name}">
-  <statistic center="5 0 0.5" extent="6"/>
+  <statistic center="{cx:.2f} {cy:.2f} 0.5" extent="6"/>
   <visual>
     <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
     <global azimuth="-130" elevation="-20"/>
@@ -48,7 +48,7 @@ HEADER = """<mujoco model="{name}">
     <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.05"/>
 {meshes}  </asset>
   <worldbody>
-    <light pos="5 0 4" dir="0 0 -1" directional="true"/>
+    <light pos="{cx:.2f} {cy:.2f} 4" dir="0 0 -1" directional="true"/>
     <geom name="floor" pos="0 0 -0.1" size="0 0 0.05" type="plane" material="groundplane"/>
 """
 FOOTER = """  </worldbody>
@@ -154,9 +154,8 @@ def walls_xml(cfg, course: Course):
     crease so the wedge-shaped gap where a flat wall meets a pitched one is closed.
     """
     h, t = cfg["course"]["walls"]["height"], cfg["course"]["walls"]["thickness"]
-    yw = course.width / 2 + t / 2
     out = []
-    for side, y in (("left", yw), ("right", -yw)):
+    for side, y in (("left", course.y1 + t / 2), ("right", course.y0 - t / 2)):
         for sec in course.sections:
             if sec.name == "ramp":
                 L = (sec.xb - sec.xa) / math.cos(course.theta)
@@ -170,9 +169,9 @@ def walls_xml(cfg, course: Course):
                 zs = course.z((sec.xa + sec.xb) / 2)
                 out.append(_box(f"wall_{side}_{sec.name}", ((xa + xb) / 2, y, zs + (h - 0.1) / 2),
                                 ((xb - xa) / 2, t / 2, (h + 0.1) / 2)))
-    span = course.width / 2 + t
-    out.append(_box("wall_back", (course.x0 - t / 2, 0, (h - 0.1) / 2), (t / 2, span, (h + 0.1) / 2)))
-    out.append(_box("wall_end", (course.x3 + t / 2, 0, course.H + (h - 0.1) / 2), (t / 2, span, (h + 0.1) / 2)))
+    span = course.width / 2 + t     # half-length across the course, covering both side walls' ends
+    out.append(_box("wall_back", (course.x0 - t / 2, course.yc, (h - 0.1) / 2), (t / 2, span, (h + 0.1) / 2)))
+    out.append(_box("wall_end", (course.x3 + t / 2, course.yc, course.H + (h - 0.1) / 2), (t / 2, span, (h + 0.1) / 2)))
     return "".join(out)
 
 
@@ -201,9 +200,9 @@ def checks(cfg, course: Course, mu, pieces):
             errors.append(f"region {sid} on the ramp: mu {mu[sid]} <= tan(theta) {tan_t:.3f}; the robot cannot stand")
     margin = c["wall_clearance"]
     for label, (x, y) in (("start", c["start"]), ("goal", c["goal"])):
-        gaps = [x - course.x0, course.x3 - x, course.width / 2 - abs(y)]
-        if min(gaps) < margin:
-            errors.append(f"{label} at ({x}, {y}) is {min(gaps):.2f} m from a wall; need >= {margin} m")
+        gap = float(course.wall_clearance(x, y))
+        if gap < margin:
+            errors.append(f"{label} at ({x}, {y}) is {gap:.2f} m from a wall; need >= {margin} m")
     return errors
 
 
@@ -224,7 +223,7 @@ def build(cfg, seed=None):
             meshes.append(m)
             geoms.append(g)
     name = cfg["name"] + ("" if seed is None else f"_s{seed}")
-    xml = (HEADER.format(name=name, meshes="".join(meshes)) + "".join(geoms)
+    xml = (HEADER.format(name=name, meshes="".join(meshes), cx=course.x3 / 2, cy=course.yc) + "".join(geoms)
            + walls_xml(cfg, course) + obstacles_xml(cfg, course) + FOOTER)
     info = dict(name=name, course=course, mu=mu, pieces=pieces, n_tiles=len(geoms))
     return xml, info

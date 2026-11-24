@@ -3,7 +3,7 @@
 Where the work stands against the plan (`docs/plan.md`, Development steps). Update this file in the same PR as
 the work it describes: change the state, add the evidence (PR, test, results file), and bump "Last updated".
 
-**Last updated:** Nov 21, 2026 (after PR #8)  
+**Last updated:** Nov 22, 2026 (task 2.3a, world frame)  
 **States:** Done · In progress · Not started · Blocked (say on what)
 
 ## Milestones
@@ -58,7 +58,7 @@ time at the friction limit (C2).
 
 | Step | Work | Done when | Target | State |
 |:--|:--|:--|:--|:--|
-| 2.3a | Move `course.py`, `terrain_gen.py`, `flat_v1`, `ramp_v1` to the new frame; spawn at the course start pose | Flat and ramp runs reach the goal; `friction_check` passes | Nov 22 | Not started |
+| 2.3a | Move `course.py`, `terrain_gen.py`, `flat_v1`, `ramp_v1` to the new frame; spawn at the course start pose | Flat and ramp runs reach the goal; `friction_check` passes | Nov 22 | Done (branch `task-2.3a-world-frame`, in review) |
 | 2.3b | Discrete friction set, ramp floor 0.3 | Same seed gives the same course; no value outside the set | Nov 22 | Not started |
 | 2.3c | `mixed_v1.yaml` with `gap` and `variant`; generator takes `--gap`, `--variant` | Scenes build for g = 0.6 to 1.1 m, both variants; opening and goal checks pass | Nov 23 | Not started |
 | 2.3d | Start-pose sampler (A1.1) | 1000 draws valid and reproducible | Nov 23 | Not started |
@@ -76,13 +76,13 @@ Code and documents written before the decisions that still need changing.
 
 | Item | Owner | State |
 |:--|:--|:--|
-| `trackC/course.py`: new frame (currently spawn at origin, y from −1.5 to 1.5) | Ben | Not started (2.3a) |
+| `trackC/course.py`: new frame | Ben | Done (2.3a) |
 | `trackC/terrain_gen.py`: discrete friction set, floor 0.3, 1.0 m obstacle clearance check | Ben | Not started (2.3b) |
-| Course files: `flat_v1`, `ramp_v1` (not yet committed), retire or rewrite `debug_v03`, new `mixed_v1` | Ben | Not started |
-| `visualize_course.py`, `friction_check.py`, `smoke_test.py`: new frame | Ben | Not started |
-| `run_waypoints.run()`: absolute start pose, path array input, fall vs collision, per-foot μ from the map, terrain-bounds check in the new frame | Jacob | Not started |
+| Course files: `flat_v1`, `ramp_v1`, `debug_v03` moved to the new frame (2.3a); `debug_v03` still has the old layout and friction classes; new `mixed_v1` | Ben | Frame done; layout in 2.3c |
+| `visualize_course.py`, `friction_check.py`, `smoke_test.py`: new frame | Ben | Done (2.3a) |
+| `run_waypoints.run()`: absolute start pose and frame-aware drawing and plots (done in 2.3a, needs Jacob's review); path array input, fall vs collision, per-foot μ from the map (to do). Terrain bounds: no change needed, gym-quadruped sets no bounds for custom scenes | Jacob | Partly done |
 | `robust_two_pass.py`: return "no feasible plan" instead of raising | Austin | Not started |
 | `predict_contacts` for the two-pass planner (owner to agree) | Austin or Ben | Not started |
 | Parameter sheet v0.4 | Ben | Not started |
 | SETUP.md: PR review (D5), branch deletion (D6), `submodule.recurse` (D7), new course commands | Ben | Not started |
-| `trackC/README.md`: new frame | Ben | Not started |
+| `trackC/README.md`: new frame | Ben | Done (2.3a) |
