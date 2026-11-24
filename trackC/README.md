@@ -62,7 +62,10 @@ downward ray grid over the whole course hits a terrain tile at the correct heigh
 ## What changed from v1, and why
 
 1. **Three-section course from the sheet.** 3 m lower flat, 6 m ramp along the slope at 10° (rises 1.04 m),
-   3 m upper flat, 3 m wide. The robot spawns at the origin, 0.8 m in front of the back wall.
+   3 m upper flat, 3 m wide. Coordinates are the world frame (decision A1): origin at the back-right inner wall
+   corner, x forward, y left (0 to 3 m), z up. The robot is placed at the course file's `start`, which is
+   (0.8, 1.5) on the current courses: 0.8 m in front of the back wall, on the centerline. (Until task 2.3a the
+   robot spawned at the origin and y ran from -1.5 to 1.5.)
 2. **Polygonal regions on any section.** Regions are drawn in plan view. The generator clips them to each
    section (this is what splits a region at a crease), cuts each piece into triangles, and builds every triangle
    as a thin prism lying on its section's plane. Triangles are used because MuJoCo collides with convex shapes,

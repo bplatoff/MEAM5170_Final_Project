@@ -1,0 +1,33 @@
+# Ramp course with one fixed friction coefficient everywhere: the nominal case for watching the Go2 climb.
+# Same geometry as debug_v03 (3 m lower flat, 6 m ramp at 10 deg, 3 m upper flat, 3 m wide), no friction regions
+# and no obstacles. The whole surface is the "medium" class, mu = 0.50, which matches the MPC's assumed mu
+# (config.mpc_params['mu']), so the controller's friction model is exactly right here.
+# World frame (decision A1): origin at the back-right inner wall corner; x forward, y left (0 to 3 m), z up.
+#
+# Build the scene (once, and again after any edit):
+#   python -m trackC.terrain_gen trackC/courses/ramp_v1.yaml
+# Watch a run (macOS: mjpython; Linux/WSL: python):
+#   mjpython -m trackA.sim.run_waypoints --course trackC/courses/ramp_v1.yaml --mpc perfoot --timeout 60
+#
+# Run without --seed on terrain_gen: a seed would redraw the friction within the medium range (0.40 to 0.60).
+
+name: ramp_v1
+
+course:
+  width: 3.0                                   # between inner wall faces: y from 0 (right) to 3 (left)
+  lower_flat: {length: 3.0}                    # starts at the back wall, x = 0
+  ramp: {length_along_slope: 6.0, angle_deg: 10}
+  upper_flat: {length: 3.0}
+  base_class: medium                           # mu = 0.50 everywhere (no regions)
+  ramp_mu_floor: 0.25                          # only applies to regions; none here
+  walls: {height: 0.5, thickness: 0.1}
+  wall_clearance: 0.5                          # start and goal must be at least this far from every wall
+  start: [0.8, 1.5]                            # 0.8 m in front of the back wall, on the centerline
+  goal: [11.3, 1.5]                            # 0.61 m before the end wall (course ends at x = 11.91)
+
+friction_classes: {low: 0.20, medium: 0.50, high: 0.80}
+randomize_ranges: {low: [0.15, 0.25], medium: [0.40, 0.60], high: [0.70, 0.90]}
+
+regions: []
+
+obstacles: []

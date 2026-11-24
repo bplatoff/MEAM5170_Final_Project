@@ -1,4 +1,6 @@
-"""Analysis of a step 1.5 exit-test folder (written by exit_test_1_5.py). Can be re-run on any old folder.
+"""Analysis of a step 1.5 exit-test folder (written by exit_test_1_5.py). Can be re-run on any folder recorded in the
+current world frame (origin at the back-right inner wall corner). Folders recorded before the frame change (task
+2.3a) used the old spawn-at-origin frame: re-analyze those from a commit before it.
 
     python -m trackA.sim.analyze_1_5 data/exit_test_1_5/<timestamp>
 
@@ -44,8 +46,7 @@ STEP_KEYS = ("t", "base_pos", "com_pos", "rpy", "base_lin_vel", "base_ang_vel", 
 # ---------------------------------------------------------------- per run
 def wall_clearance(xy: np.ndarray, course: Course) -> np.ndarray:
     """Distance from each (x, y) to the nearest inner wall face, plan view. Negative means past the face."""
-    hw = course.width / 2
-    return np.min(np.stack([hw - xy[:, 1], hw + xy[:, 1], xy[:, 0] - course.x0, course.x3 - xy[:, 0]]), axis=0)
+    return course.wall_clearance(xy[:, 0], xy[:, 1])
 
 
 def hit_events(d) -> list[dict]:
@@ -96,7 +97,7 @@ def analyze_run(folder: Path, r: dict, course: Course) -> dict:
         cte_max=float(e.max()), cte_mean_settled=float(e[settled].mean()) if settled.any() else np.nan,
         speed_err_mean=float(v_err.mean()),
         min_wall_clearance=float(clearance.min()),
-        min_side_clearance=float((course.width / 2 - np.abs(d["com_pos"][:, 1])).min()),
+        min_side_clearance=float(np.minimum(d["com_pos"][:, 1] - course.y0, course.y1 - d["com_pos"][:, 1]).min()),
         wall_hit_events=len(hits), wall_hit_contacts=int(sum(h["n_contacts"] for h in hits)),
         wall_hit_max_pen=max((h["max_penetration"] for h in hits), default=0.0),
         mpc_solves=len(solve_t), mpc_interval_ms=1e3 * interval,
@@ -163,7 +164,6 @@ def plot_overview(folder: Path, rows: list[dict], course: Course):
 
     paths = sorted({r["path"] for r in rows})
     fig, axes = plt.subplots(len(paths), 1, figsize=(11, 3.6 * len(paths)), squeeze=False)
-    hw = course.width / 2
     for ax, p in zip(axes[:, 0], paths):
         for r in (r for r in rows if r["path"] == p and "_data" in r):
             d = r["_data"]
@@ -174,7 +174,7 @@ def plot_overview(folder: Path, rows: list[dict], course: Course):
                 ax.plot(*d["com_pos"][min(i, len(d["t"]) - 1), :2], "x", color="r", ms=8)
         wp = next(r["_data"]["waypoints"] for r in rows if r["path"] == p and "_data" in r)
         ax.plot(wp[:, 0], wp[:, 1], "o--", color="0.5", lw=1, label="waypoint path")
-        ax.plot([course.x0, course.x3, course.x3, course.x0, course.x0], [-hw, -hw, hw, hw, -hw], color="k", lw=2)
+        ax.plot([course.x0, course.x3, course.x3, course.x0, course.x0], [course.y0, course.y0, course.y1, course.y1, course.y0], color="k", lw=2)
         n_ok = sum(r["reached_goal"] for r in rows if r["path"] == p)
         n = sum(r["path"] == p for r in rows)
         ax.set_title(f"{p}: {n_ok}/{n} reached the goal (blue: goal, red: not; x: wall hit)")

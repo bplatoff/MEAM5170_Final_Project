@@ -15,6 +15,9 @@ Run from the repo root, inside the pixi env (see SETUP.md):
     python -m trackA.sim.run_waypoints --no-render --timeout 90
     python -m trackA.sim.run_waypoints --seed 3            # spawn jittered by +-10 cm in x, y and +-15 deg in yaw
 
+Coordinates are the world frame (decision A1): origin at the back-right inner wall corner, x forward, y left, z up.
+The robot is placed at the course file's `start` (plus the seeded jitter), not at the MuJoCo origin.
+
 Log (one .npz per run): every simulation step (robot state, feet, commands, latest MPC GRFs), every MPC solve
 (time, solve time, acados status), every robot contact with a wall_/obstacle_ geom, and the Track C contact
 logger's stance events (holds / slips) in a separate *_contacts.npz.
@@ -48,20 +51,23 @@ JITTER_XY = 0.10                # [m]   spawn offset drawn uniformly in +-JITTER
 JITTER_YAW = np.deg2rad(15.0)   # [rad] spawn yaw drawn uniformly in +-JITTER_YAW (when seeded)
 
 
-def spawn_with_jitter(env, seed):
-    """Reset to keyframe 0, then shift the base by a seeded random (dx, dy) and rotate it by a random yaw.
+def spawn_with_jitter(env, start, course: Course, seed):
+    """Place the robot at the course start, optionally with a seeded random offset (dx, dy) and yaw.
 
-    Returns (dx, dy, dyaw). seed None: no jitter (the unseeded runs stay exactly as before).
+    The keyframe stands the robot at the MuJoCo origin, which in our world frame is the back-right wall corner, so
+    the base is always moved to `start` (x, y) at the keyframe's height above the surface there.
+    Returns (dx, dy, dyaw). seed None: no jitter.
     """
     env.reset(random=False)
-    if seed is None:
-        return 0.0, 0.0, 0.0
-    rng = np.random.default_rng(seed)
-    dx, dy = rng.uniform(-JITTER_XY, JITTER_XY, size=2)
-    dyaw = rng.uniform(-JITTER_YAW, JITTER_YAW)
+    dx = dy = dyaw = 0.0
+    if seed is not None:
+        rng = np.random.default_rng(seed)
+        dx, dy = rng.uniform(-JITTER_XY, JITTER_XY, size=2)
+        dyaw = rng.uniform(-JITTER_YAW, JITTER_YAW)
     qpos, qvel = env.mjData.qpos.copy(), np.zeros_like(env.mjData.qvel)
-    qpos[0] += dx
-    qpos[1] += dy
+    qpos[0] = start[0] + dx
+    qpos[1] = start[1] + dy
+    qpos[2] += course.z(qpos[0])         # keyframe height is above z = 0; add the surface height at the start
     quat_xyzw = np.roll(qpos[3:7], -1)   # MuJoCo stores w, x, y, z
     rot = Rotation.from_euler("z", dyaw) * Rotation.from_quat(quat_xyzw)
     qpos[3:7] = np.roll(rot.as_quat(), 1)
@@ -148,10 +154,10 @@ def draw_walls(viewer, walls, course: Course, geom_ids: dict) -> dict:
     """Draw each CoM wall a_x x + a_y y <= b as a red line across the course, clipped to the course box."""
     if not walls:
         return geom_ids
-    hw, x_lo, x_hi = course.width / 2, course.x0, course.x3
+    x_lo, x_hi = course.x0, course.x3
     for k, (ax, ay, b) in enumerate(walls):
         if abs(ay) < 1e-9:      # vertical in plan view: x = b / ax
-            p0, p1 = np.array([b / ax, -hw]), np.array([b / ax, hw])
+            p0, p1 = np.array([b / ax, course.y0]), np.array([b / ax, course.y1])
         else:                   # y = (b - ax x) / ay
             p0 = np.array([x_lo, (b - ax * x_lo) / ay])
             p1 = np.array([x_hi, (b - ax * x_hi) / ay])
@@ -162,19 +168,20 @@ def draw_walls(viewer, walls, course: Course, geom_ids: dict) -> dict:
 
 
 # ---------------------------------------------------------------- waypoints
-def make_waypoints(kind: str, start, goal, amplitude: float = 1.0, n_legs: int = 5) -> np.ndarray:
+def make_waypoints(kind: str, start, goal, amplitude: float = 1.0, n_legs: int = 5,
+                   y_center: float = 1.5) -> np.ndarray:
     """Hand-placed waypoint paths for step 1.1. Later the planner's path replaces these: result["x"][:, :2].
 
     straight: start -> goal.
-    zigzag:   start -> alternating +-amplitude in y -> goal, n_legs segments evenly spaced in x. With the
-              3 m wide course, amplitude 1.0 keeps the path 0.5 m from the walls (the wall-clearance rule).
+    zigzag:   start -> alternating y_center +- amplitude -> goal, n_legs segments evenly spaced in x. On the
+              3 m wide course (centerline y = 1.5), amplitude 1.0 keeps the path 0.5 m from the walls.
     """
     start, goal = np.asarray(start, float), np.asarray(goal, float)
     if kind == "straight":
         return np.array([start, goal])
     if kind == "zigzag":
         xs = np.linspace(start[0], goal[0], n_legs + 1)
-        ys = [start[1]] + [amplitude * (1 if k % 2 == 0 else -1) for k in range(n_legs - 1)] + [goal[1]]
+        ys = [start[1]] + [y_center + amplitude * (1 if k % 2 == 0 else -1) for k in range(n_legs - 1)] + [goal[1]]
         return np.column_stack([xs, ys])
     raise ValueError(f"unknown path kind: {kind}")
 
@@ -227,7 +234,8 @@ def run(course_path: str, path_kind: str = "straight", v_ref: float = 0.4, timeo
     env.mjModel.opt.gravity[2] = -cfg.gravity_constant
     if cfg.qpos0_js is not None:  # some robots need a different zero joint configuration
         env.mjModel.qpos0 = np.concatenate((env.mjModel.qpos0[:7], cfg.qpos0_js))
-    jitter = spawn_with_jitter(env, seed)
+    course = Course(course_cfg["course"])   # world-frame geometry: surface height z(x), wall faces
+    jitter = spawn_with_jitter(env, start, course, seed)
 
     spawn_xy = env.base_pos[:2].copy()
     print(f"spawn: xy ({spawn_xy[0]:+.3f}, {spawn_xy[1]:+.3f}) m, yaw {np.rad2deg(env.base_ori_euler_xyz[2]):+.1f} deg"
@@ -236,9 +244,8 @@ def run(course_path: str, path_kind: str = "straight", v_ref: float = 0.4, timeo
     if np.linalg.norm(spawn_xy - np.asarray(start)) > 0.2:
         print(f"warning: robot spawned at {spawn_xy}, course start is {start}")
 
-    waypoints = make_waypoints(path_kind, start, goal)
+    waypoints = make_waypoints(path_kind, start, goal, y_center=course.yc)
     follower = PathFollower(waypoints, v_ref=v_ref)
-    course = Course(course_cfg["course"])   # surface height z(x), so the path is drawn on ramps too
     path_geom_ids = {}
 
     if render:
@@ -444,17 +451,17 @@ def run(course_path: str, path_kind: str = "straight", v_ref: float = 0.4, timeo
 
     if plot:
         plot_run(arrays, waypoints, f"{stem}.png", title=f"{scene} / {path_kind}: {outcome}",
-                 half_width=course_cfg["course"]["width"] / 2)
+                 y_walls=(course.y0, course.y1))
         print(f"plot: {stem}.png")
     summary["log"] = f"{stem}.npz"
     return summary
 
 
-def plot_run(arrays: dict, waypoints: np.ndarray, out_path: str, title: str = "", half_width: float = 1.5):
+def plot_run(arrays: dict, waypoints: np.ndarray, out_path: str, title: str = "", y_walls=(0.0, 3.0)):
     """Plan view of the path against the robot's base track, and the cross-track error over time.
 
-    The plan view always spans the course width (+-half_width, wall faces dashed), so a straight run with
-    centimeter-level error doesn't collapse the equal-aspect axes.
+    The plan view always spans the course width (y_walls = right and left wall faces, dashed), so a straight run
+    with centimeter-level error doesn't collapse the equal-aspect axes.
     """
     import matplotlib
     matplotlib.use("Agg")
@@ -463,9 +470,9 @@ def plot_run(arrays: dict, waypoints: np.ndarray, out_path: str, title: str = ""
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7), gridspec_kw=dict(height_ratios=[2, 1]))
     ax1.plot(waypoints[:, 0], waypoints[:, 1], "o--", color="0.5", label="waypoint path")
     ax1.plot(arrays["base_pos"][:, 0], arrays["base_pos"][:, 1], color="C0", label="base")
-    for y in (-half_width, half_width):
+    for y in y_walls:
         ax1.axhline(y, color="0.3", ls=":", lw=1)
-    ax1.set_ylim(-half_width - 0.2, half_width + 0.2)
+    ax1.set_ylim(y_walls[0] - 0.2, y_walls[1] + 0.2)
     ax1.set_aspect("equal")
     ax1.set_xlabel("x [m]")
     ax1.set_ylabel("y [m]")

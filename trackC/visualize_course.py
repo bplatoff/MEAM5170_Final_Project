@@ -43,13 +43,12 @@ for r in cfg["regions"]:                                   # region outlines and
             color="white" if mu[r["id"]] > 0.55 else "#111111")
 for xc, label in ((course.x1, "bottom crease"), (course.x2, "top crease")):
     ax.axvline(xc, color="#990000", ls="--", lw=1)
-    ax.text(xc, course.width / 2 + 0.28, label, color="#990000", ha="center", fontsize=8)
+    ax.text(xc, course.y1 + 0.28, label, color="#990000", ha="center", fontsize=8)
 t = cfg["course"]["walls"]["thickness"]
-w2 = course.width / 2
-for y0 in (w2, -w2 - t):
-    ax.add_patch(Rectangle((course.x0 - t, y0), course.x3 - course.x0 + 2 * t, t, color="#888888"))
-for x0 in (course.x0 - t, course.x3):
-    ax.add_patch(Rectangle((x0, -w2 - t), t, course.width + 2 * t, color="#888888"))
+for yw in (course.y1, course.y0 - t):                      # left and right walls (outside the inner faces)
+    ax.add_patch(Rectangle((course.x0 - t, yw), course.x3 - course.x0 + 2 * t, t, color="#888888"))
+for xw in (course.x0 - t, course.x3):                      # back and end walls
+    ax.add_patch(Rectangle((xw, course.y0 - t), t, course.width + 2 * t, color="#888888"))
 for o in cfg.get("obstacles", []):
     (x, y), (L, W) = o["center"], o["size"]
     ax.add_patch(Rectangle((x - L / 2, y - W / 2), L, W, color="#333333"))
@@ -59,7 +58,11 @@ ax.plot(gx, gy, "*", color="#D4A000", ms=16)
 ax.text(sx, sy - 0.32, "start", ha="center", fontsize=8)
 ax.text(gx, gy - 0.35, "goal", ha="center", fontsize=8)
 ax.set_xlim(course.x0 - 0.4, course.x3 + 0.4)
-ax.set_ylim(-w2 - 0.45, w2 + 0.5)
+ax.set_ylim(course.y0 - 0.45, course.y1 + 0.5)
+ax.annotate("", xy=(0.6, 0), xytext=(0, 0), arrowprops=dict(arrowstyle="->", color="#990000", lw=1.5))   # world frame
+ax.annotate("", xy=(0, 0.6), xytext=(0, 0), arrowprops=dict(arrowstyle="->", color="#990000", lw=1.5))
+ax.text(0.62, -0.05, "x", color="#990000", fontsize=8, va="top")
+ax.text(-0.05, 0.62, "y", color="#990000", fontsize=8, ha="right")
 ax.set_aspect("equal")
 ax.set_title(f"plan view: {info['n_tiles']} tiles (white edges = triangulation)", loc="left")
 ax.set_ylabel("y [m]")
