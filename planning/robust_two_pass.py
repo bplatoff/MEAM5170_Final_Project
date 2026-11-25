@@ -115,6 +115,10 @@ def plan_two_pass_friction_tube(
     # First pass: footprint + geometric safety margin, with no tube.
     nominal_config = dict(config)
     nominal_config["tube_position_margin_m"] = 0.0
+    if config.get("horizon_mode", "fixed") == "astar_length":
+        # r_w is propagated on the error model's grid, so choose a horizon
+        # that contains an integer number of error_dt steps.
+        nominal_config["horizon_quantum_s"] = float(error_dt)
     nominal = _run_planning_pass(start_state, goal_state, environment, nominal_config)
     if not nominal["success"]:
         return _failed_outcome("nominal", nominal)
@@ -162,6 +166,11 @@ def plan_two_pass_friction_tube(
     # three footprint circles and both A* and NLP collision constraints.
     robust_config = dict(config)
     robust_config["tube_position_margin_m"] = margin_m
+    if config.get("horizon_mode", "fixed") == "astar_length":
+        # Tube predictions belong to the nominal horizon. Inflated A* may
+        # take a different route, but MUST NOT silently change T.
+        robust_config["horizon_mode"] = "fixed"
+        robust_config["T"] = horizon
     robust = _run_planning_pass(start_state, goal_state, environment, robust_config)
     if not robust["success"]:
         return _failed_outcome(
