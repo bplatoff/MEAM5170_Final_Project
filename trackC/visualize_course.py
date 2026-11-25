@@ -2,6 +2,7 @@
 profile. Use it to check a layout before simulating, and to see exactly how the generator cut the regions up.
 
 Usage (from the repo root): python -m trackC.visualize_course trackC/courses/debug_v03.yaml [--seed N] [--out course.png]
+                            python -m trackC.visualize_course trackC/courses/mixed_v1.yaml --gap 0.8 --variant high
 """
 import argparse
 import math
@@ -19,13 +20,15 @@ from trackC.terrain_gen import build, triangulate
 ap = argparse.ArgumentParser()
 ap.add_argument("config")
 ap.add_argument("--seed", type=int, default=None)
+ap.add_argument("--gap", type=float, default=None, help="mid-ramp gap width [m] (courses with mid_ramp_gap)")
+ap.add_argument("--variant", choices=["low", "high"], default=None, help="friction class of the gap patch")
 ap.add_argument("--out", default="course.png")
 ap.add_argument("--title", default="Example course design", help="figure title")
 a = ap.parse_args()
-cfg = yaml.safe_load(open(a.config))
-_, info = build(cfg, a.seed)
+_, info = build(a.config, a.seed, gap=a.gap, variant=a.variant)
+cfg = info["cfg"]                                          # expanded: includes the mid-ramp barrier and gap patch
 course, mu = info["course"], info["mu"]
-cmap, norm = plt.get_cmap("Blues"), Normalize(0.0, 0.9)
+cmap, norm = plt.get_cmap("Blues"), Normalize(0.0, 0.9)    # friction set is 0.3 to 0.8 (decision C3)
 
 fig, (ax, ax2) = plt.subplots(2, 1, figsize=(13, 7.8), gridspec_kw={"height_ratios": [3, 1.3]})
 fig.suptitle(f"{a.title}: {info['name']}", fontsize=15, fontweight="bold", x=0.01, y=0.99, ha="left", va="top")
@@ -41,6 +44,12 @@ for r in cfg["regions"]:                                   # region outlines and
     cx, cy = poly.mean(axis=0)
     ax.text(cx, cy, f"{r['id']}\n{mu[r['id']]:.2f}", ha="center", va="center", fontsize=7.5,
             color="white" if mu[r["id"]] > 0.55 else "#111111")
+g = cfg.get("mid_ramp_gap")
+if g:                                                      # mark the swept opening
+    y_end = course.y1 - g["gap"]
+    ax.annotate("", xy=(g["x"], course.y1), xytext=(g["x"], y_end), arrowprops=dict(arrowstyle="<->", color="#D4A000", lw=1.5))
+    ax.text(g["x"] - 0.25, (y_end + course.y1) / 2, f"gap {g['gap']:.2f} m\n{g['variant']} patch", fontsize=7.5,
+            color="#7A5B00", va="center", ha="right")
 for xc, label in ((course.x1, "bottom crease"), (course.x2, "top crease")):
     ax.axvline(xc, color="#990000", ls="--", lw=1)
     ax.text(xc, course.y1 + 0.28, label, color="#990000", ha="center", fontsize=8)

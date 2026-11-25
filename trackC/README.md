@@ -47,7 +47,7 @@ Smoke tests:
 
 | Test | Expected | Measured |
 |---|---|---|
-| Flat ice (μ 0.20), pushed sideways | sliding ratio 0.20 | 0.200 |
+| Flat ice (μ 0.30 since decision C3; 0.20 before), pushed sideways | sliding ratio 0.30 | 0.300 |
 | Standing still on the ramp, all four feet | tan 10° = 0.176 | 0.176 |
 | Ramp snow (μ 0.30), pushed downhill | sliding ratio 0.30 | 0.300 |
 | Pushed toward the left wall | wall collision | `wall_left_lower` |
@@ -72,11 +72,19 @@ downward ray grid over the whole course hits a terrain tile at the correct heigh
    and any polygon, including concave ones or the base surface with holes, splits into triangles.
 3. **Walls on all four sides,** 0.5 m above the local surface, pitched along the ramp. Robot contact with a wall
    or obstacle is logged as a collision.
-4. **Friction classes and seeds.** `low / medium / high` = 0.20 / 0.50 / 0.80, or seeded draws within each class
-   range. A region touching the ramp is never drawn below the 0.25 ramp floor, so one region keeps one friction
-   value on every section. `ramp_stress_test: true` on a region allows going below the floor (down to tan θ).
-5. **Checks that stop a bad course:** ramp friction at or below tan θ, start or goal closer than 0.5 m to a wall,
-   or pieces that don't exactly cover the course.
+4. **Friction classes and seeds (decision C3, `course_spec.py`).** Every surface takes one value from
+   {0.3, 0.4, 0.5, 0.6, 0.7, 0.8}; 0.3 is the lower limit everywhere, flat and ramp. Classes are fixed for the
+   team: `low` 0.3, `medium` 0.5 (seeds draw 0.4 / 0.5 / 0.6), `high` 0.8 (seeds draw 0.7 / 0.8). Base ground is
+   `friction.base` (0.5) and never changes with the seed. An explicit `mu` must be in the set. Course files with
+   the old keys (`friction_classes`, `randomize_ranges`, `ramp_mu_floor`, `base_class`) are rejected with the fix.
+   *(Until task 2.3b: classes 0.20 / 0.50 / 0.80 with continuous seeded ranges and a 0.25 ramp floor.)*
+5. **Checks that stop a bad course:** ramp friction at or below tan θ, start or goal closer than 0.5 m to a wall
+   or than `obstacle_clearance` (default 1.0 m, decision A3.3) to an obstacle, or pieces that don't exactly cover
+   the course.
+5b. **Mid-ramp gap (decision A3.1).** A `mid_ramp_gap` block becomes a barrier attached to the right wall, leaving
+   `gap` to the left wall, plus a `gap_patch` region of class `variant` (`low` or `high`). `terrain_gen`,
+   `visualize_course` and `friction_check` take `--gap` and `--variant`; overridden scenes are named
+   `<course>_g<gap>_<variant>[_s<seed>]`. `planner_env.planner_problem` gives the planner the same obstacles.
 6. **Logger fix: force ratio in the surface frame.** v1 computed |f_xy| / f_z, which is only right on flat
    ground. On the ramp, friction acts along the surface, so v2 splits each foot force into the part along the
    contact normal and the part tangent to it. Test 2 above is the check: world-frame math would give about 0.

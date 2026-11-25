@@ -23,8 +23,10 @@ environment, data and learning).
 
 - World frame: origin at the back-right inner wall corner on the lower flat; x forward, y left, z up. All data
   between modules is in this frame. Course is 3 m wide; walls 0.5 m high.
-- Friction values come from {0.3, 0.4, 0.5, 0.6, 0.7, 0.8}. Nominal 0.5, lower limit 0.3 everywhere.
-- Before learning: μ_plan = 0.5, μ_lo = 0.3 everywhere, so the tube has constant width α = r_w / (1 − ρ).
+- Friction values come from {0.3, 0.4, 0.5, 0.6, 0.7, 0.8}. Nominal 0.5, lower limit 0.3 everywhere. The classes and
+  checks live in `trackC/course_spec.py`; every module loads courses through `load_course_cfg`.
+- Before learning: μ_plan = 0.5, μ_lo = 0.3 everywhere (`trackC.friction_map.PriorFrictionMap`), so the tube has
+  constant width α = r_w / (1 − ρ).
 - Footprint: three circles of radius 0.194 m at 0 and ±0.233 m along the body axis.
 - Tube radii are in meters (B1). K is computed once, offline; its sign is built in (A_cl = A + BK).
 - Evaluation: 20 seeds per controller per mid-ramp gap width (g from about 0.6 to 1.1 m).
@@ -48,7 +50,9 @@ environment, data and learning).
 ```bash
 python -m trackC.terrain_gen trackC/courses/flat_v1.yaml        # build and install a course scene
 python -m trackC.friction_check trackC/courses/flat_v1.yaml     # every surface within about 0.01 of its friction
-python -m trackC.smoke_test trackC/courses/flat_v1.yaml         # logger physics checks
+python -m trackC.smoke_test trackC/courses/debug_v03.yaml       # logger physics checks
+python -m unittest trackC.test_course_spec                      # friction rules, mid-ramp gap, planner converter
+python -m trackC.terrain_gen trackC/courses/mixed_v1.yaml --gap 0.8 --variant high --seed 3   # one swept course
 python -m trackA.sim.run_waypoints --course trackC/courses/flat_v1.yaml --mpc perfoot --no-render
 python -m trackA.reference.test_path_follower
 python -m controllers.test_1_4_hooks
