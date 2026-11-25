@@ -9,6 +9,7 @@ from planning.planner_helpers import (
 from planning.robot_footprint import add_three_circle_constraints
 from planning.footprint_astar import astar_three_circle_path
 from planning.yaw_reference import make_rate_limited_yaw_reference
+from planning.route_horizon import choose_planning_horizon
 
 
 def add_obstacle_constraints(state, obstacles, r_robot, beta, g, lbg, ubg):
@@ -47,12 +48,6 @@ def plan_trajectory(start_state, goal_state, environment, config):
 
     # control discretization
     N = config['N']
-
-    # time horizon
-    T = config['T']
-
-    # duration of each section
-    h = T/N 
 
     mu = environment.friction_mu
     gravity = 9.81
@@ -117,6 +112,14 @@ def plan_trajectory(start_state, goal_state, environment, config):
             inflation_radius=r_robot, resolution=resolution,
             extra_clearance=clearance,
         )
+
+    # Select a fixed T from the actual obstacle-aware A* path, before IPOPT.
+    # Legacy callers keep an explicit fixed T by default.
+    if len(astar_path) == 1:
+        # Single-circle A* returns one point when both endpoints share a cell.
+        astar_path = np.array([start_state[:2], goal_state[:2]], dtype=float)
+    T, astar_length_m = choose_planning_horizon(config, astar_path)
+    h = T / N
 
     # Optional bounded-rate yaw reference: same orientation is used both
     # by the NLP collision constraints and in the returned yaw_ref.
@@ -381,6 +384,7 @@ def plan_trajectory(start_state, goal_state, environment, config):
         "t": t,
         "x": x_opt.T,
         "u": u_opt.T,
+        "astar_path_length_m": astar_length_m,
         "success": stats["success"],
         "return_status": stats["return_status"],
     }
