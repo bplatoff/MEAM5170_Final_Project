@@ -27,7 +27,10 @@ environment, data and learning).
   checks live in `trackC/course_spec.py`; every module loads courses through `load_course_cfg`.
 - Before learning: μ_plan = 0.5, μ_lo = 0.3 everywhere (`trackC.friction_map.PriorFrictionMap`), so the tube has
   constant width α = r_w / (1 − ρ).
-- Footprint: three circles of radius 0.194 m at 0 and ±0.233 m along the body axis.
+- Footprint: three circles of radius 0.194 m at 0 and ±0.233 m along the body axis. With margin, tube and heading
+  allowance each needs 0.53 m to a wall, so the CoM needs 0.763 m to the back and end walls (`trackC/start_pose.py`).
+- Start poses: `trackC.start_pose.sample_start(cfg, start_seed)`, uniform over the course's `start_zone`, seed separate
+  from the friction seed (A1.1).
 - Tube radii are in meters (B1). K is computed once, offline; its sign is built in (A_cl = A + BK).
 - Evaluation: 20 seeds per controller per mid-ramp gap width (g from about 0.6 to 1.1 m).
 

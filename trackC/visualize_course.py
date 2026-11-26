@@ -61,6 +61,10 @@ for xw in (course.x0 - t, course.x3):                      # back and end walls
 for o in cfg.get("obstacles", []):
     (x, y), (L, W) = o["center"], o["size"]
     ax.add_patch(Rectangle((x - L / 2, y - W / 2), L, W, color="#333333"))
+z = cfg["course"].get("start_zone")
+if z:                                                      # seeded start poses are drawn from this box (A1.1)
+    ax.add_patch(Rectangle((z["x"][0], z["y"][0]), z["x"][1] - z["x"][0], z["y"][1] - z["y"][0], fill=False,
+                           ec="#00A000", ls="--", lw=1.2))
 (sx, sy), (gx, gy) = cfg["course"]["start"], cfg["course"]["goal"]
 ax.plot(sx, sy, "o", color="#00A000", ms=10)
 ax.plot(gx, gy, "*", color="#D4A000", ms=16)

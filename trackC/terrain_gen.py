@@ -13,7 +13,8 @@ Pipeline (each step is one function below):
   3. triangulate        split every piece into triangles (pieces can be concave or have holes; triangles are convex)
   4. prism_xml          lift each triangle onto its section's plane and extrude it 5 cm down: a convex mesh geom
   5. walls / obstacles  enclose all four sides; place obstacle boxes
-  6. checks             ramp friction above tan(theta), start/goal clearance to walls and obstacles, full coverage
+  6. checks             ramp friction above tan(theta), start zone and goal clearance (walls, obstacles, robust
+                        footprint, see start_pose.py), full coverage
 
 Rules carried over from the tests on the first starter (see README):
   * Terrain geoms are named "surf_<region>__<k>". All pieces of one region share <region>, so seams between them
@@ -34,6 +35,7 @@ from shapely.ops import unary_union
 
 from trackC.course import Course
 from trackC.course_spec import load_course_cfg, resolve_friction, scene_name
+from trackC.start_pose import check_start_and_goal
 
 TILE_DEPTH = 0.05   # [m] tiles are prisms extruded this far below the surface
 
@@ -183,6 +185,7 @@ def checks(cfg, course: Course, mu, pieces):
             d = obstacle_distance(o, x, y)
             if d < ob_margin:
                 errors.append(f"{label} at ({x}, {y}) is {d:.2f} m from obstacle {o['id']}; need >= {ob_margin} m")
+    errors += check_start_and_goal(cfg, course)       # seeded start zone (A1.1) and robust footprint room at both ends
     return errors
 
 

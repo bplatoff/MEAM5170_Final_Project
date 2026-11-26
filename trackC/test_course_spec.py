@@ -10,6 +10,8 @@ from trackC.course_spec import (FRICTION_CLASSES, FRICTION_SET, CourseSpecError,
                                 resolve_friction, scene_name)
 from trackC.friction_map import PriorFrictionMap, query
 from trackC.planner_env import planner_problem
+from trackC.start_pose import ROBUST_CIRCLE_CLEARANCE, check_start_and_goal, footprint_wall_clearance, sample_start
+from trackC.course import Course
 from trackC.terrain_gen import build
 
 MIXED = "trackC/courses/mixed_v1.yaml"
@@ -108,6 +110,41 @@ class Planner(unittest.TestCase):
     def test_start_override(self):
         p = planner_problem(MIXED, start=(1.0, 1.2))
         np.testing.assert_allclose(p.start_state, [1.0, 1.2, 0, 0])
+
+
+class StartPose(unittest.TestCase):
+    def test_draws_are_reproducible_inside_the_zone_and_valid(self):
+        for path in COURSES:
+            cfg = load_course_cfg(path)
+            course, z = Course(cfg["course"]), cfg["course"]["start_zone"]
+            poses = [sample_start(cfg, s) for s in range(500)]
+            self.assertEqual(sample_start(cfg, 42), sample_start(cfg, 42))
+            xs, ys, yaws = (np.array([getattr(p, k) for p in poses]) for k in ("x", "y", "yaw"))
+            self.assertTrue(np.all((xs >= z["x"][0]) & (xs <= z["x"][1]) & (ys >= z["y"][0]) & (ys <= z["y"][1])))
+            self.assertLessEqual(np.abs(yaws).max(), np.radians(z["yaw_deg"]) + 1e-12)
+            if cfg["course"].get("robust_planning", True):
+                worst = min(footprint_wall_clearance(course, p.x, p.y, p.yaw) for p in poses)
+                self.assertGreaterEqual(worst, 0.0)
+
+    def test_draws_are_spread_over_the_zone(self):
+        cfg = load_course_cfg(MIXED)
+        xs = np.array([sample_start(cfg, s).x for s in range(2000)])
+        counts, _ = np.histogram(xs, bins=4, range=cfg["course"]["start_zone"]["x"])
+        self.assertTrue(np.all(np.abs(counts - 500) < 100), counts)      # roughly uniform
+
+    def test_robust_clearance_numbers(self):
+        self.assertAlmostEqual(ROBUST_CIRCLE_CLEARANCE, 0.194 + 0.05 + 0.263 + 0.0233, places=3)
+        course = Course(load_course_cfg(MIXED)["course"])
+        # facing along x, the CoM needs 0.233 + 0.530 = 0.763 m to the end wall
+        self.assertAlmostEqual(footprint_wall_clearance(course, course.x3 - 0.7633, 1.5, 0.0), 0.0, places=3)
+
+    def test_bad_zone_or_goal_is_reported(self):
+        cfg = load_course_cfg(MIXED)
+        cfg["course"]["goal"] = [11.3, 1.5]                            # too close to the end wall for the tube
+        self.assertTrue(any("goal" in e for e in check_start_and_goal(cfg, Course(cfg["course"]))))
+        cfg = load_course_cfg(MIXED)
+        cfg["course"]["start_zone"]["x"] = [0.8, 2.0]                  # runs into the gateway
+        self.assertTrue(any("obstacle" in e for e in check_start_and_goal(cfg, Course(cfg["course"]))))
 
 
 class Prior(unittest.TestCase):

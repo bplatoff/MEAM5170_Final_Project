@@ -3,7 +3,7 @@
 Where the work stands against the plan (`docs/plan.md`, Development steps). Update this file in the same PR as
 the work it describes: change the state, add the evidence (PR, test, results file), and bump "Last updated".
 
-**Last updated:** Nov 25, 2026 (tasks 2.3b, 2.3c, 2.3e, prior friction map)  
+**Last updated:** Nov 25, 2026 (tasks 2.3b to 2.3e, prior friction map)  
 **States:** Done · In progress · Not started · Blocked (say on what)
 
 ## Milestones
@@ -61,7 +61,7 @@ time at the friction limit (C2).
 | 2.3a | Move `course.py`, `terrain_gen.py`, `flat_v1`, `ramp_v1` to the new frame; spawn at the course start pose | Flat and ramp runs reach the goal; `friction_check` passes | Nov 22 | Done (branch `task-2.3a-world-frame`, in review) |
 | 2.3b | Discrete friction set, ramp floor 0.3 | Same seed gives the same course; no value outside the set | Nov 22 | Done (`course_spec.py`, `test_course_spec`) |
 | 2.3c | `mixed_v1.yaml` with `gap` and `variant`; generator takes `--gap`, `--variant` | Scenes build for g = 0.6 to 1.1 m, both variants; opening and goal checks pass | Nov 23 | Done (`mixed_v1.yaml`) |
-| 2.3d | Start-pose sampler (A1.1) | 1000 draws valid and reproducible | Nov 23 | Not started |
+| 2.3d | Start-pose sampler (A1.1) | 1000 draws valid and reproducible | Nov 23 | Done (`trackC/start_pose.py`; zones in every course file; robust plans from 3 sampled starts on mixed_v1) |
 | 2.3e | Course YAML to planner converter; two-pass plan per gap; infeasible caught as "no feasible plan" | Every gap gives a path or a clean rejection | Nov 23 | Converter done (`planner_env.py`). Planner: no tube plans gaps ≥ 0.8 m; full tube plans gap 2.0 but A* fails at 1.1 (Austin's A* item) |
 | 2.3f | `trackC/metrics.py`: outcome, time to goal (overall, ramp), clearance, slips, time at friction limit; tube drift placeholder | Unit tests on synthetic logs pass | Nov 24 | Not started |
 | 2.3g | `python -m trackC.batch`: builds each scene, one subprocess per run, writes `runs.csv` and a summary by controller and gap | 2 gaps × 3 seeds dry run with `nominal`; full-sweep time estimated | Nov 24 | Not started |
