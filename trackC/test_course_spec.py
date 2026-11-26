@@ -100,7 +100,7 @@ class Planner(unittest.TestCase):
         self.assertEqual(len(env.obstacles), len(p.cfg["obstacles"]))           # 4 posts + the barrier
         self.assertEqual(env.friction_mu, 0.5)
         np.testing.assert_allclose(p.start_state, [0.8, 1.5, 0, 0])
-        np.testing.assert_allclose(p.goal_state, [11.1, 1.5, 0, 0])
+        np.testing.assert_allclose(p.goal_state, [10.91, 1.5, 0, 0])
         barrier = env.obstacles[-1]
         self.assertAlmostEqual(barrier[:, 1].max(), 3.0 - 0.8)                   # gap edge
         for poly in env.obstacles:                                               # counter-clockwise

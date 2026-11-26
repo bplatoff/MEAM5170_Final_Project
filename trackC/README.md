@@ -89,7 +89,7 @@ downward ray grid over the whole course hits a terrain tile at the correct heigh
    `sample_start(cfg, seed)` draws x, y and yaw uniformly from it, with its own seed. The build checks that every
    pose in the zone, and the goal at any heading within 15°, leaves each footprint circle 0.53 m from the walls
    (radius 0.194 + margin 0.05 + tube 0.263 + heading 0.023). Facing along x, that puts the CoM at least 0.763 m
-   from the back and end walls, which is why the goals moved to x = 11.1. `robust_planning: false` skips this for
+   from the back and end walls. Goals sit 1.0 m from the end wall (x = 10.91 on the ramp courses, 11.0 on flat_v1). `robust_planning: false` skips this for
    legacy layouts (`debug_v03`).
 6. **Logger fix: force ratio in the surface frame.** v1 computed |f_xy| / f_z, which is only right on flat
    ground. On the ramp, friction acts along the surface, so v2 splits each foot force into the part along the
