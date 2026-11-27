@@ -136,9 +136,9 @@ $$r_{w} = \Delta t\left( \mu_{plan} - \mu_{lo} \right)g + r_{0}$$
 
 Here r_0 covers velocity-tracking error, from the logs. Before learning, query(x, y) in the certificate layer returns μ_plan = 0.5 and μ_lo = 0.3 everywhere, so r_w is the same across the course. Deviations are corrected by Austin’s LQR gain K, computed once offline, acting on the error between the measured state and the mid layer’s nominal state:
 
-$$a_{cmd} = {\bar{a}}_{k} + K\left( x_{meas} - {\bar{x}}_{k} \right),\ \ \ \ \ v_{cmd} = v_{meas} + \Delta t\ a_{cmd}$$
+$$a_{cmd} = {\bar{a}}_{k} + K\left( x_{meas} - {\bar{x}}_{k} \right),\ \ \ \ \ v_{cmd} = \left( \tau_{eff}\ a_{cmd} + v_{meas} \right)/k$$
 
-x̄ is the nominal position and velocity and ā the nominal acceleration. K already includes the minus sign (A_cl = A + BK), so this is negative feedback. The velocity command matches the double-integrator error model as long as Quadruped-PyMPC reaches it within one step. The tube width follows the homothetic tube recursion from the robust control lecture:
+x̄ is the nominal position and velocity and ā the nominal acceleration. K already includes the minus sign (A_cl = A + BK), so this is negative feedback. The velocity command inverts Quadruped-PyMPC's measured first-order velocity lag (time constant τ and gain k per body axis, from step tests; τ_eff = Δt/(1 − e^(−Δt/τ))), so the robot reaches the commanded acceleration over one step and matches the double-integrator error model (B3, revised Nov 26; the original v_meas + Δt a_cmd stays available as an option). The tube width follows the homothetic tube recursion from the robust control lecture:
 
 $$\alpha_{k + 1} = \rho\ \alpha_{k} + r_{w,k},\ \ \ \ \ \alpha_{\infty} = \frac{r_{w}}{1 - \rho}$$
 

@@ -10,7 +10,7 @@
 
 **Footprint (Jacob's decision):** the mid-layer MPC and its planner call now use **three circles by default**, and Austin's planner default should match. With the full tube, this lowers the smallest passable opening from 1.49 m to about **1.06 m**. Narrower gaps should return "no feasible plan" unless task 2.5 shrinks the tube.
 
-**MPC design (Jacob's decision):** the target MPC starts from the **measured state** and grows the tube from zero at every solve. Obstacles are **soft constraints with a large linear penalty**, so the robot still gets a recovery command after a shove beyond the tube. **This version is built but is not the default:** it passed the no-push checks and never fell at 1.25 m/s² (8 of 8 vs 4 of 8 for the carried-nominal QP), but it did worse at 1.0 m/s² (worst error 75 cm vs 11 cm) and a leg touched the ramp barrier in 3 pushed runs (two of them on seeds where the carried-nominal QP fell). **Stage 2 keeps the carried-nominal QP**, the only version with no contact in any run.
+**MPC design (Jacob's decision):** the target MPC starts from the **measured state** and grows the tube from zero at every solve. Obstacles are **soft constraints with a large linear penalty**, so the robot still gets a recovery command after a shove beyond the tube. **It is the default since Nov 26 (Jacob's decision).** It passed the no-push checks and never fell at 1.25 m/s² (8 of 8 vs 4 of 8 for the carried-nominal QP), but it did worse at 1.0 m/s² (worst error 75 cm vs 11 cm) and a leg touched the ramp barrier in 3 pushed runs (two of them on seeds where the carried-nominal QP fell). The carried-nominal QP, the only version with no contact in any run, stays available with `--qp-start carried`. The friction-limit fix and a push margin target the contacts before 2.7.
 
 **Needed from Austin and Ben by Wed Nov 25,** so validation can finish before M2 on Nov 27.
 
@@ -23,7 +23,7 @@
 4. ~~`run_waypoints` integration and full-course runs~~ Done
 5. ~~Push tests and logs for task 2.5~~ Done
 6. ~~Switch the MPC and planner call to three circles (J8)~~ Done
-7. ~~Measured-state MPC comparison (J9)~~ Done Nov 26: fails "no worse than carried" at 1.0 m/s², so the carried-nominal QP stays the default. Cross-track weighting is dropped as a fix for the contacts: in those runs the QP was already pushing sideways at its friction limit (section 0)
+7. ~~Measured-state MPC comparison (J9)~~ Done Nov 26: fails "no worse than carried" at 1.0 m/s², but never falls; Jacob made it the default anyway (Nov 26). Cross-track weighting is dropped as a fix for the contacts: in those runs the QP was already pushing sideways at its friction limit (section 0)
 8. **Merge `master` (world frame, 2.3a) into `trackA-2-4`** and open the PR
 9. **Friction limits** (plan: `trackA/plans/friction_limits.md`): replace the low-level pyramid, which allows √2·μ diagonally (Ben, Nov 25), with 8 faces (at least 0.924·μ in every direction); fit the mid layer's polygons inside their circles; subtract δ from the slope and uphill limits. Then try a push margin for the measured-start QP
 10. Improve recovery on the ramp, then integrate teammates' work when it lands
@@ -50,7 +50,7 @@
 
 | Who | Decision | Recommendation (used until decided) |
 |---|---|---|
-| **Jacob + Austin** | Replace B3's `v_cmd = v_meas + dt·a_cmd`? | Yes. In full runs, error was 2.9 cm with the measured-lag conversion and 19.5 cm with B3. At a 1.0 m/s² push: 22.6 cm (inside the tube) vs 47 cm (outside). Caveat: B3 did not fall at 1.25 m/s², but left the tube by up to 2.4× |
+| **Jacob + Austin** | Replace B3's `v_cmd = v_meas + dt·a_cmd`? | Yes; the team agreed Nov 26 and B3 is revised in `docs/decisions.md`. In full runs, error was 2.9 cm with the measured-lag conversion and 19.5 cm with B3. At a 1.0 m/s² push: 22.6 cm (inside the tube) vs 47 cm (outside). Caveat: B3 did not fall at 1.25 m/s², but left the tube by up to 2.4× |
 | **Jacob + Austin** | What disturbance does the tube claim to cover? | Keep 1.96 m/s² for planning for now, but state that only 1.0 m/s² is demonstrated until recovery improves or 2.5 shows the real shortfall is smaller |
 | **Jacob + Austin** | Keep the gait-cycle filter on `v_meas`? | No, it adds about 0.36 s of delay. Full runs used raw `v_meas` and tracked to 2.9 cm without pushes |
 | **Jacob + Austin** | Acceleration limits | `‖a‖ ≤ (μ_plan − δ)g`, with turn and uphill limits from `μ_lo` |
@@ -73,7 +73,7 @@
 
 ## 0. Implementation status (Nov 26)
 
-Built without changes to Track B or Track C code. J8 and J9 are committed and pushed on `trackA-2-4` at `6c15d04` (the one-circle version is `8b0ea34`), and are not merged to `master`. The default is three circles with the carried-nominal QP. Run the measured-state version with `--qp-start measured`.
+Built without changes to Track B or Track C code. J8 and J9 are committed and pushed on `trackA-2-4` at `6c15d04` (the one-circle version is `8b0ea34`), and are not merged to `master`. Merged with `master` (world frame) on Nov 26. The default is three circles with the measured-state QP (since Nov 26). Run the carried-nominal version with `--qp-start carried`.
 
 | Piece | File |
 |---|---|
@@ -146,7 +146,7 @@ Built without changes to Track B or Track C code. J8 and J9 are committed and pu
   - Fresh seed 6 at 1.0 m/s² is the only measured-only failure. The robot stumbled and backed down the ramp at up to 0.54 m/s, while the QP kept spending friction sideways and the velocity command followed the slide (−0.44 m/s). Why it stumbled there and the carried version did not is unknown, from one run.
   - Earlier offline re-solves of two runs without contact found the QP trading sideways push-back for along-track catch-up. That explains their larger error at 1.0 m/s², not the contacts.
   - Solve-time overruns are not a cause, because the simulation waits for each solve.
-- **Decision:** keep the carried-nominal QP for stage 2, since 2.7 requires no collisions and at 1.0 m/s² it is the only version without contact. Cross-track weighting is dropped as a contact fix. Next comes the friction-limit fix (`trackA/plans/friction_limits.md`), then a push margin for the measured-start QP.
+- **Decision (Jacob, Nov 26):** the measured-state QP is the default. It never fell, while the carried-nominal QP fell in 4 of 8 runs at 1.25 m/s². The cost is the contacts above: 2.7 requires no collisions, and at 1.0 m/s² the carried-nominal QP is the only version without contact. Cross-track weighting is dropped as a contact fix. Next comes the friction-limit fix (`trackA/plans/friction_limits.md`), then a push margin for the measured-state QP.
 
 **Next for Jacob:** merge `master` (world frame) and open the PR. Then, both before 2.7 runs: the friction-limit fix (`trackA/plans/friction_limits.md`), and a start pose, path array and the mid-layer controller in `run_waypoints.run()`, so Ben's batch runner can drop its shim and run the `robust` controller. Then end-to-end stage 2 (2.6).
 
@@ -224,7 +224,7 @@ Test on the 1.7 m course first, then on a 1.25 m version. Openings of 1.2 m or l
 
 ### Measured-state MPC (J9)
 
-**Decision:** the MPC starts from the measured state, so it can plan a recovery around obstacles after a shove, even when the robot has left the tube. The formulation is in section 2. **Status:** built and selectable with `--qp-start measured`, but not the default because it failed J9's push comparison (section 0).
+**Decision:** the MPC starts from the measured state, so it can plan a recovery around obstacles after a shove, even when the robot has left the tube. The formulation is in section 2. **Status:** the default since Nov 26, although it failed J9's push comparison (section 0); `--qp-start carried` selects the carried-nominal QP.
 
 | File | Change |
 |---|---|
@@ -322,7 +322,7 @@ Use the `perfoot` MPC with `set_friction(μ_lo)`. The tube is applied in the mid
 
 ### MPC (target design, J9)
 
-*Built and selectable as `qp_start="measured"`. The default is still `qp_start="carried"`, with one slack and a terminal equality, until J9 passes.*
+*The default since Nov 26 (`qp_start="measured"`). `qp_start="carried"` keeps one slack and a terminal equality.*
 
 ```
 Decide:  x̄_1..x̄_N,  ā_0..ā_{N-1},  s_t,k,  s_b,k,  s_v,k
@@ -461,7 +461,7 @@ In `trackA/sim/run_waypoints.py`, add a controller option, a planner path source
 | **Task 2.5 results** | Update `r_0`, the tube, and opening widths | Measured errors stay within `r_w` |
 | **All of the above** | End-to-end stage 2 (2.6), then validation with Austin (2.7) | 20 seeds per gap, no collisions, deviation inside the tube |
 
-**J9 currently does worse, so stage 2 uses the carried-nominal QP** unless the measured-state MPC is fixed and passes before M2. Otherwise, finish that comparison after M2, on low-friction patches and narrow gaps.
+**Stage 2 uses the measured-state QP (Jacob, Nov 26),** although J9 found it worse at 1.0 m/s² pushes and the only version with contact. The friction-limit fix and a push margin (`trackA/plans/friction_limits.md`) are meant to remove the contacts before 2.7; the carried-nominal QP stays available as the fallback.
 
 ## 4. Repo status
 

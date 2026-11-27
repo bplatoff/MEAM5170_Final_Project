@@ -51,8 +51,8 @@ class MidLayerConfig:
     conversion: str = "lag_inverse" # "lag_inverse" or "b3" (v_cmd = v_meas + dt * a_cmd)
 
     use_qp: bool = True             # False: the nominal is the planner reference and only LQR acts
-    qp_start: str = "carried"       # "carried": it starts at the carried nominal. "measured": each solve starts at x_meas
-                                    # (built, but failed J9's "no worse than carried" check on pushed runs)
+    qp_start: str = "measured"      # "measured" (default, Jacob, Nov 26): each solve starts at x_meas. "carried": it
+                                    # starts at the carried nominal (no contact in J9's pushed runs, but more falls)
 
     # Measured-start QP penalties, l s + q s^2. l_body > l_tube + 2 q_tube r_tube makes it use the tube margin first.
     l_tube: float = 1e4

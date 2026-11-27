@@ -71,7 +71,7 @@ Then commit the results, a results section in this plan and `docs/status.md`, an
 
 ## Team decisions needed before the PR
 
-1. **Uphill rule (Austin).** `docs/plan.md` sets a_up ≤ (μ_lo cos θ − sin θ)·g, and Austin's TODO 8 adds it to the planner. This plan adds δ and the 16-gon factor, giving 0.67 m/s² at 10°. Both controllers should follow the same rule. Otherwise Austin's planner may ask for up to 1.19 m/s² uphill, more than the QP allows.
+1. **Uphill rule (Austin).** Decision A3.5 and `docs/plan.md` set a_up ≤ (μ_lo cos θ − sin θ)·g, and Austin's TODO 8 adds it to the planner. Adding δ changes a closed decision, so the decision sheet and `docs/decisions.md` must change with this PR. This plan adds δ and the 16-gon factor, giving 0.67 m/s² at 10°. Both controllers should follow the same rule. Otherwise Austin's planner may ask for up to 1.19 m/s² uphill, more than the QP allows.
 2. **Tube size (Austin, task 2.2).** The tube assumes the low level delivers μ_lo = 0.3 in every direction, but the 8-face pyramid only guarantees 0.277. Sized for 0.277, the tube grows from 26.3 to 29.3 cm, and the smallest passable opening rises by about 6 cm, to roughly 1.12 m. Recommendation: keep 0.3 for M2, record the gap, and let task 2.5's measured drift decide.
 3. **Shared low level (Ben).** The path follower and Ben's batch runner use the same low-level controller, so their results change too. Ben's ramp test stalled at μ = 0.2; step 1 rechecks the climb.
 
