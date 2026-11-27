@@ -15,7 +15,7 @@ course:
   start: [0.8, 1.5]
   goal: [11.3, 1.5]
   robust_planning: false                       # legacy layout for the logger tests: no room for the robust footprint
-  start_zone: {x: [0.8, 1.4], y: [0.6, 2.4], yaw_deg: 15}   # seeded start poses are drawn from here (A1.1, start_pose.py)
+  start_zone: {x: [0.8, 1.2], y: [0.9, 2.1], yaw_deg: 15}   # seeded starts (A1.1); in line with the 1.2 m gateway, see start_pose.py
 
 friction: {base: 0.5}                          # base ground; region classes and the friction set are in trackC/course_spec.py
 

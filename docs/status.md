@@ -3,7 +3,7 @@
 Where the work stands against the plan (`docs/plan.md`, Development steps). Update this file in the same PR as
 the work it describes: change the state, add the evidence (PR, test, results file), and bump "Last updated".
 
-**Last updated:** Nov 25, 2026 (tasks 2.3b to 2.3e, prior friction map)  
+**Last updated:** Nov 26, 2026 (tasks 2.3f, 2.3g: metrics and batch runner)  
 **States:** Done · In progress · Not started · Blocked (say on what)
 
 ## Milestones
@@ -63,9 +63,9 @@ time at the friction limit (C2).
 | 2.3c | `mixed_v1.yaml` with `gap` and `variant`; generator takes `--gap`, `--variant` | Scenes build for g = 0.6 to 1.1 m, both variants; opening and goal checks pass | Nov 23 | Done (`mixed_v1.yaml`) |
 | 2.3d | Start-pose sampler (A1.1) | 1000 draws valid and reproducible | Nov 23 | Done (`trackC/start_pose.py`; zones in every course file; robust plans from 3 sampled starts on mixed_v1) |
 | 2.3e | Course YAML to planner converter; two-pass plan per gap; infeasible caught as "no feasible plan" | Every gap gives a path or a clean rejection | Nov 23 | Converter done (`planner_env.py`). Planner: no tube plans gaps ≥ 0.8 m; full tube plans gap 2.0 but A* fails at 1.1 (Austin's A* item) |
-| 2.3f | `trackC/metrics.py`: outcome, time to goal (overall, ramp), clearance, slips, time at friction limit; tube drift placeholder | Unit tests on synthetic logs pass | Nov 24 | Not started |
-| 2.3g | `python -m trackC.batch`: builds each scene, one subprocess per run, writes `runs.csv` and a summary by controller and gap | 2 gaps × 3 seeds dry run with `nominal`; full-sweep time estimated | Nov 24 | Not started |
-| 2.3h | Controller slots `robust`, `learned`, `oracle` | `robust` runs once 2.4 exists | After 2.4 | Blocked on 2.4 |
+| 2.3f | `trackC/metrics.py`: outcome, time to goal (overall, ramp), clearance, slips, time at friction limit; tube drift placeholder | Unit tests on synthetic logs pass | Nov 24 | Done (`trackC/metrics.py`, `test_batch`; slip rule checked on recorded runs). Tube drift waits for the mid layer |
+| 2.3g | `python -m trackC.batch`: builds each scene, one subprocess per run, writes `runs.csv` and a summary by controller and gap | 2 gaps × 3 seeds dry run with `nominal`; full-sweep time estimated | Nov 24 | Done with a temporary `run()` shim (`batch_sim.py`); dry run on `mixed_mu03_v1` |
+| 2.3h | Controller slots `robust`, `learned`, `oracle` | `robust` runs once 2.4 exists | After 2.4 | `robust_follower` (tube plan, cones 0.3) runs now; `robust`, `learned`, `oracle` wait on 2.4, 3.3 and the `run()` interface |
 
 To agree before 2.3a: `run()` signature (start pose, path array, scene, per-foot μ source) with Jacob; who writes
 `predict_contacts` and the "no feasible plan" status with Austin; outcome definitions with both.

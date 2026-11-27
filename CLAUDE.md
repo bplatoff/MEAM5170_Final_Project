@@ -54,7 +54,8 @@ environment, data and learning).
 python -m trackC.terrain_gen trackC/courses/flat_v1.yaml        # build and install a course scene
 python -m trackC.friction_check trackC/courses/flat_v1.yaml     # every surface within about 0.01 of its friction
 python -m trackC.smoke_test trackC/courses/debug_v03.yaml       # logger physics checks
-python -m unittest trackC.test_course_spec                      # friction rules, mid-ramp gap, planner converter
+python -m unittest trackC.test_course_spec trackC.test_batch     # course rules, gap, converter, metrics, batch matrix
+python -m trackC.batch --course trackC/courses/mixed_mu03_v1.yaml --gaps 1.1 --variants low --seeds 2   # small sweep
 python -m trackC.terrain_gen trackC/courses/mixed_v1.yaml --gap 0.8 --variant high --seed 3   # one swept course
 python -m trackA.sim.run_waypoints --course trackC/courses/flat_v1.yaml --mpc perfoot --no-render
 python -m trackA.reference.test_path_follower

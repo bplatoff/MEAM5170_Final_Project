@@ -25,7 +25,7 @@ course:
   obstacle_clearance: 1.0                      # and at least this far from every obstacle
   start: [0.8, 1.5]                            # nominal start (center-back of the start zone)
   goal: [10.91, 1.5]                           # fixed for every run (A3.3): 1.0 m from the end wall (x = 11.91), 1.21 m past the passage
-  start_zone: {x: [0.8, 1.4], y: [0.6, 2.4], yaw_deg: 15}   # seeded start poses are drawn from here (A1.1, start_pose.py)
+  start_zone: {x: [0.8, 1.2], y: [0.9, 2.1], yaw_deg: 15}   # seeded starts (A1.1); in line with the 1.2 m gateway, see start_pose.py
 
 friction: {base: 0.5}                          # base ground; region classes and the friction set are in trackC/course_spec.py
 

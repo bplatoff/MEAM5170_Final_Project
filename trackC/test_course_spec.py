@@ -15,7 +15,8 @@ from trackC.course import Course
 from trackC.terrain_gen import build
 
 MIXED = "trackC/courses/mixed_v1.yaml"
-COURSES = ["trackC/courses/flat_v1.yaml", "trackC/courses/ramp_v1.yaml", "trackC/courses/debug_v03.yaml", MIXED]
+COURSES = ["trackC/courses/flat_v1.yaml", "trackC/courses/ramp_v1.yaml", "trackC/courses/debug_v03.yaml", MIXED,
+           "trackC/courses/ramp_mu03_v1.yaml", "trackC/courses/mixed_mu03_v1.yaml"]
 
 
 class Friction(unittest.TestCase):

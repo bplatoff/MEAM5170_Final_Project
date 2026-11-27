@@ -2,11 +2,16 @@
 
 Start pose. Each course file has a `start_zone` on the lower flat:
 
-    start_zone: {x: [0.8, 1.4], y: [0.6, 2.4], yaw_deg: 15}
+    start_zone: {x: [0.8, 1.2], y: [0.9, 2.1], yaw_deg: 15}
 
 `sample_start(cfg, seed)` draws x, y and yaw uniformly from it. The start seed is its own number, separate from the
 friction seed, so the batch runner can vary one while holding the other. The zone is checked once when the course is
 built (terrain_gen), so every draw is valid and no draw is rejected: the distribution stays uniform.
+
+The zone spans the 1.2 m gateway's opening (y 0.9 to 2.1) and stays at least 1.2 m behind it. A wider first try
+(x up to 1.4, y 0.6 to 2.4) passed every check here, but from a start tucked behind a gateway post the robust
+planner's A* (full tube, yaw-rate limit) found no way to line up with the opening. All four corners of this zone at
++-15 deg plan successfully with the full tube on mixed_mu03_v1. The build checks cannot see A* reachability.
 
 Footprint clearance. The robust planner keeps each of the three footprint circles (A2.1) at least
 ROBUST_CIRCLE_CLEARANCE from every wall:
