@@ -79,7 +79,7 @@ Code and documents written before the decisions that still need changing.
 |:--|:--|:--|
 | `trackC/course.py`: new frame | Ben | Done (2.3a) |
 | `trackC/terrain_gen.py`: discrete friction set, floor 0.3, 1.0 m obstacle clearance check | Ben | Done (2.3b) |
-| Course files: new frame (2.3a) and friction schema (2.3b); new `mixed_v1` (2.3c); `debug_v03` keeps its old layout for the logger tests; Jacob's `midlayer_*` courses need the friction schema change | Ben, Jacob | Done for track C |
+| Course files: new frame (2.3a) and friction schema (2.3b); new `mixed_v1` (2.3c); `debug_v03` keeps its old layout for the logger tests; Jacob's `midlayer_*` courses converted to the friction schema with a `start_zone` (Nov 27; their scenes are unchanged) | Ben, Jacob | Done |
 | `visualize_course.py`, `friction_check.py`, `smoke_test.py`: new frame | Ben | Done (2.3a) |
 | `run_waypoints.run()`: absolute start pose and frame-aware drawing and plots (done in 2.3a; merged into `trackA-2-4` Nov 26). To do: start pose and path array as arguments and the mid layer as a controller (Ben's `batch_sim.py` shim until then); per-foot μ from the map. Fall vs collision: Ben's `trackC/metrics.py` (branch `task-2.3bce-friction-mixed`). Terrain bounds: no change needed, gym-quadruped sets no bounds for custom scenes | Jacob | Partly done |
 | `robust_two_pass.py`: return "no feasible plan" instead of raising | Austin | Not started |
