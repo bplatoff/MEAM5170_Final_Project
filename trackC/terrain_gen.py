@@ -1,17 +1,20 @@
 """Generate the course from the parameter sheet (v0.3) as a MuJoCo scene for gym-quadruped / Quadruped-PyMPC.
 
 Usage (from the repo root):
-    python -m trackC.terrain_gen trackC/courses/debug_v03.yaml            # fixed class values (0.20 / 0.50 / 0.80)
-    python -m trackC.terrain_gen trackC/courses/debug_v03.yaml --seed 7    # values drawn within each class range, seed 7
+    python -m trackC.terrain_gen trackC/courses/debug_v03.yaml            # class values 0.3 / 0.5 / 0.8
+    python -m trackC.terrain_gen trackC/courses/debug_v03.yaml --seed 7    # each class region draws from its set, seed 7
+    python -m trackC.terrain_gen trackC/courses/mixed_v1.yaml --gap 0.8 --variant high   # override the mid-ramp gap
 Then set Quadruped-PyMPC  simulation_params['scene'] = '<scene name printed by this script>'.
 
 Pipeline (each step is one function below):
-  1. resolve_friction   decide each region's mu: its class value, an explicit mu, or a seeded draw in the class range
+  0. load_course_cfg    (course_spec) check the friction rules, apply --gap / --variant, add the barrier and gap patch
+  1. resolve_friction   (course_spec) each region's mu: its class value, an explicit mu, or a seeded draw from its class
   2. plan_pieces        in plan view, cut the course into non-overlapping pieces: (region or base) x (section)
   3. triangulate        split every piece into triangles (pieces can be concave or have holes; triangles are convex)
   4. prism_xml          lift each triangle onto its section's plane and extrude it 5 cm down: a convex mesh geom
   5. walls / obstacles  enclose all four sides; place obstacle boxes
-  6. checks             ramp friction floor, start/goal clearances, every course point covered exactly once
+  6. checks             ramp friction above tan(theta), start zone and goal clearance (walls, obstacles, robust
+                        footprint, see start_pose.py), full coverage
 
 Rules carried over from the tests on the first starter (see README):
   * Terrain geoms are named "surf_<region>__<k>". All pieces of one region share <region>, so seams between them
@@ -21,7 +24,6 @@ Rules carried over from the tests on the first starter (see README):
 """
 import argparse
 import math
-import random
 import sys
 from pathlib import Path
 
@@ -32,6 +34,8 @@ from shapely.geometry import Polygon, box
 from shapely.ops import unary_union
 
 from trackC.course import Course
+from trackC.course_spec import load_course_cfg, resolve_friction, scene_name
+from trackC.start_pose import check_start_and_goal
 
 TILE_DEPTH = 0.05   # [m] tiles are prisms extruded this far below the surface
 
@@ -57,33 +61,7 @@ FOOTER = """  </worldbody>
 
 
 # ---------------------------------------------------------------- 1. friction
-def resolve_friction(cfg, course: Course, seed=None):
-    """Return {region_id: mu} for every region plus "base".
-
-    Without a seed, a region gets its explicit `mu` or its class value. With a seed, regions given by class get a
-    value drawn uniformly from that class's range, so the same seed always produces the same course (needed for
-    controller-to-controller comparisons). A region that touches the ramp is never drawn below the ramp friction
-    floor, because one region must have ONE friction value on every section it covers.
-    """
-    classes, ranges = cfg["friction_classes"], cfg["randomize_ranges"]
-    floor = cfg["course"]["ramp_mu_floor"]
-    ramp_rect = course.section_rect(course.sections[1])
-    rng = random.Random(seed)
-    out = {}
-    for r in [dict(id="base", **{"class": cfg["course"]["base_class"]}, polygon=None)] + cfg["regions"]:
-        if "mu" in r:
-            mu = r["mu"]
-        elif seed is None:
-            mu = classes[r["class"]]
-        else:
-            lo, hi = ranges[r["class"]]
-            mu = round(rng.uniform(lo, hi), 3)
-        on_ramp = r["polygon"] is None or Polygon(r["polygon"]).intersects(ramp_rect)
-        if on_ramp and mu < floor and not r.get("ramp_stress_test", False):
-            print(f"  note: region {r['id']} touches the ramp; mu {mu} raised to the ramp floor {floor}")
-            mu = floor
-        out[r["id"]] = mu
-    return out
+# Friction values come from trackC.course_spec.resolve_friction (decision C3: discrete set, lower limit 0.3).
 
 
 # ---------------------------------------------------------------- 2. plan-view pieces
@@ -198,18 +176,32 @@ def checks(cfg, course: Course, mu, pieces):
     for sid, sec, _ in pieces:
         if sec.name == "ramp" and mu[sid] <= tan_t:
             errors.append(f"region {sid} on the ramp: mu {mu[sid]} <= tan(theta) {tan_t:.3f}; the robot cannot stand")
-    margin = c["wall_clearance"]
+    margin, ob_margin = c["wall_clearance"], c.get("obstacle_clearance", 1.0)
     for label, (x, y) in (("start", c["start"]), ("goal", c["goal"])):
         gap = float(course.wall_clearance(x, y))
         if gap < margin:
             errors.append(f"{label} at ({x}, {y}) is {gap:.2f} m from a wall; need >= {margin} m")
+        for o in cfg.get("obstacles", []):
+            d = obstacle_distance(o, x, y)
+            if d < ob_margin:
+                errors.append(f"{label} at ({x}, {y}) is {d:.2f} m from obstacle {o['id']}; need >= {ob_margin} m")
+    errors += check_start_and_goal(cfg, course)       # seeded start zone (A1.1) and robust footprint room at both ends
     return errors
 
 
+def obstacle_distance(o, x, y) -> float:
+    """Plan-view distance from (x, y) to an axis-aligned obstacle box (0 inside it)."""
+    (cx, cy), (L, W) = o["center"], o["size"]
+    dx, dy = max(abs(x - cx) - L / 2, 0.0), max(abs(y - cy) - W / 2, 0.0)
+    return float((dx * dx + dy * dy) ** 0.5)
+
+
 # ---------------------------------------------------------------- assemble
-def build(cfg, seed=None):
+def build(cfg, seed=None, gap=None, variant=None):
+    """cfg: a course dict or a path. gap, variant: override the course's mid-ramp gap (see course_spec)."""
+    cfg = load_course_cfg(cfg, gap=gap, variant=variant)
     course = Course(cfg["course"])
-    mu = resolve_friction(cfg, course, seed)
+    mu = resolve_friction(cfg, seed)
     pieces = plan_pieces(cfg, course)
     errs = checks(cfg, course, mu, pieces)
     if errs:
@@ -222,10 +214,10 @@ def build(cfg, seed=None):
             m, g = prism_xml(f"surf_{sid}__{k}", tri, course, mu[sid])
             meshes.append(m)
             geoms.append(g)
-    name = cfg["name"] + ("" if seed is None else f"_s{seed}")
+    name = scene_name(cfg, seed, overridden=cfg.get("_overridden", False))
     xml = (HEADER.format(name=name, meshes="".join(meshes), cx=course.x3 / 2, cy=course.yc) + "".join(geoms)
            + walls_xml(cfg, course) + obstacles_xml(cfg, course) + FOOTER)
-    info = dict(name=name, course=course, mu=mu, pieces=pieces, n_tiles=len(geoms))
+    info = dict(name=name, course=course, mu=mu, pieces=pieces, n_tiles=len(geoms), cfg=cfg)
     return xml, info
 
 
@@ -240,10 +232,11 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("config")
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--gap", type=float, default=None, help="mid-ramp gap width [m] (courses with mid_ramp_gap)")
+    ap.add_argument("--variant", choices=["low", "high"], default=None, help="friction class of the gap patch")
     ap.add_argument("--out", help="write the XML here instead of installing it into gym_quadruped")
     a = ap.parse_args()
-    cfg = yaml.safe_load(open(a.config))
-    xml, info = build(cfg, a.seed)
+    xml, info = build(a.config, a.seed, gap=a.gap, variant=a.variant)
     print(info["course"].summary())
     print(f"{len(info['mu'])} surfaces, {info['n_tiles']} tiles; friction: "
           + ", ".join(f"{k}={v}" for k, v in info["mu"].items()))

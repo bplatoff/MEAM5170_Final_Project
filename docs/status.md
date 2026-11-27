@@ -3,7 +3,8 @@
 Where the work stands against the plan (`docs/plan.md`, Development steps). Update this file in the same PR as
 the work it describes: change the state, add the evidence (PR, test, results file), and bump "Last updated".
 
-**Last updated:** Nov 26, 2026 (task 2.4, mid-layer robust MPC)  
+**Last updated:** Nov 27, 2026 (task 2.4, mid-layer robust MPC; tasks 2.3b to 2.3g)  
+
 **States:** Done · In progress · Not started · Blocked (say on what)
 
 ## Milestones
@@ -39,7 +40,7 @@ the work it describes: change the state, add the evidence (PR, test, results fil
 | 2.7 | Stage 2 validation, 20 seeds per gap | B | Nov 23 to 27 | Not started | Needs 2.5, 2.6 |
 | 3.1 | Emulated probe data | C | Nov 15 to 17 | Not started | |
 | 3.2 | GP on equalities | C | Nov 17 to 21 | Not started | |
-| 3.3 | Certificate layer, `query(x, y)` | C | Nov 20 to 24 | Not started | A prior-only `query` (0.5 / 0.3) is enough for stage 2 |
+| 3.3 | Certificate layer, `query(x, y)` | C | Nov 20 to 24 | Not started | Interface and prior-only map done: `trackC/friction_map.py` (0.5 / 0.3) |
 | 3.4 | Boundary unit tests | C | Nov 24 to 25 | Not started | |
 | 3.5 | μ into r_w and α_k; μ_lo speed limits | B | Nov 23 to 25 | Not started | |
 | 3.6 | Between-run loop | A | Nov 25 to Dec 1 | Not started | |
@@ -59,13 +60,13 @@ time at the friction limit (C2).
 | Step | Work | Done when | Target | State |
 |:--|:--|:--|:--|:--|
 | 2.3a | Move `course.py`, `terrain_gen.py`, `flat_v1`, `ramp_v1` to the new frame; spawn at the course start pose | Flat and ramp runs reach the goal; `friction_check` passes | Nov 22 | Done (branch `task-2.3a-world-frame`, in review) |
-| 2.3b | Discrete friction set, ramp floor 0.3 | Same seed gives the same course; no value outside the set | Nov 22 | Not started |
-| 2.3c | `mixed_v1.yaml` with `gap` and `variant`; generator takes `--gap`, `--variant` | Scenes build for g = 0.6 to 1.1 m, both variants; opening and goal checks pass | Nov 23 | Not started |
-| 2.3d | Start-pose sampler (A1.1) | 1000 draws valid and reproducible | Nov 23 | Not started |
-| 2.3e | Course YAML to planner converter; two-pass plan per gap; infeasible caught as "no feasible plan" | Every gap gives a path or a clean rejection | Nov 23 | Not started |
-| 2.3f | `trackC/metrics.py`: outcome, time to goal (overall, ramp), clearance, slips, time at friction limit; tube drift placeholder | Unit tests on synthetic logs pass | Nov 24 | Not started |
-| 2.3g | `python -m trackC.batch`: builds each scene, one subprocess per run, writes `runs.csv` and a summary by controller and gap | 2 gaps × 3 seeds dry run with `nominal`; full-sweep time estimated | Nov 24 | Not started |
-| 2.3h | Controller slots `robust`, `learned`, `oracle` | `robust` runs once 2.4 exists | After 2.4 | Blocked on 2.4 |
+| 2.3b | Discrete friction set, ramp floor 0.3 | Same seed gives the same course; no value outside the set | Nov 22 | Done (`course_spec.py`, `test_course_spec`) |
+| 2.3c | `mixed_v1.yaml` with `gap` and `variant`; generator takes `--gap`, `--variant` | Scenes build for g = 0.6 to 1.1 m, both variants; opening and goal checks pass | Nov 23 | Done (`mixed_v1.yaml`) |
+| 2.3d | Start-pose sampler (A1.1) | 1000 draws valid and reproducible | Nov 23 | Done (`trackC/start_pose.py`; zones in every course file; robust plans from 3 sampled starts on mixed_v1) |
+| 2.3e | Course YAML to planner converter; two-pass plan per gap; infeasible caught as "no feasible plan" | Every gap gives a path or a clean rejection | Nov 23 | Converter done (`planner_env.py`). Planner: no tube plans gaps ≥ 0.8 m; full tube plans gap 2.0 but A* fails at 1.1 (Austin's A* item) |
+| 2.3f | `trackC/metrics.py`: outcome, time to goal (overall, ramp), clearance, slips, time at friction limit; tube drift placeholder | Unit tests on synthetic logs pass | Nov 24 | Done (`trackC/metrics.py`, `test_batch`; slip rule checked on recorded runs). Tube drift waits for the mid layer |
+| 2.3g | `python -m trackC.batch`: builds each scene, one subprocess per run, writes `runs.csv` and a summary by controller and gap | 2 gaps × 3 seeds dry run with `nominal`; full-sweep time estimated | Nov 24 | Done with a temporary `run()` shim (`batch_sim.py`); dry run on `mixed_mu03_v1` |
+| 2.3h | Controller slots `robust`, `learned`, `oracle` | `robust` runs once 2.4 exists | After 2.4 | `robust_follower` (tube plan, cones 0.3) runs now; `robust`, `learned`, `oracle` wait on 2.4, 3.3 and the `run()` interface |
 
 To agree before 2.3a: `run()` signature (start pose, path array, scene, per-foot μ source) with Jacob; who writes
 `predict_contacts` and the "no feasible plan" status with Austin; outcome definitions with both.
@@ -77,8 +78,8 @@ Code and documents written before the decisions that still need changing.
 | Item | Owner | State |
 |:--|:--|:--|
 | `trackC/course.py`: new frame | Ben | Done (2.3a) |
-| `trackC/terrain_gen.py`: discrete friction set, floor 0.3, 1.0 m obstacle clearance check | Ben | Not started (2.3b) |
-| Course files: `flat_v1`, `ramp_v1`, `debug_v03` moved to the new frame (2.3a); `debug_v03` still has the old layout and friction classes; new `mixed_v1` | Ben | Frame done; layout in 2.3c |
+| `trackC/terrain_gen.py`: discrete friction set, floor 0.3, 1.0 m obstacle clearance check | Ben | Done (2.3b) |
+| Course files: new frame (2.3a) and friction schema (2.3b); new `mixed_v1` (2.3c); `debug_v03` keeps its old layout for the logger tests; Jacob's `midlayer_*` courses need the friction schema change | Ben, Jacob | Done for track C |
 | `visualize_course.py`, `friction_check.py`, `smoke_test.py`: new frame | Ben | Done (2.3a) |
 | `run_waypoints.run()`: absolute start pose and frame-aware drawing and plots (done in 2.3a; merged into `trackA-2-4` Nov 26). To do: start pose and path array as arguments and the mid layer as a controller (Ben's `batch_sim.py` shim until then); per-foot μ from the map. Fall vs collision: Ben's `trackC/metrics.py` (branch `task-2.3bce-friction-mixed`). Terrain bounds: no change needed, gym-quadruped sets no bounds for custom scenes | Jacob | Partly done |
 | `robust_two_pass.py`: return "no feasible plan" instead of raising | Austin | Not started |

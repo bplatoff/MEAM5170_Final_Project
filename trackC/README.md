@@ -15,6 +15,14 @@ gym-quadruped Go2 model in MuJoCo 3.x. The Quadruped-PyMPC controller itself has
 | `contact_logger.py` | Per-step foot contacts, slip detection, wall and obstacle collisions, per-stance hold/slip events; straddle flag for evaluation only |
 | `smoke_test.py` | Physics checks of the logger without the MPC |
 | `course_debug_v03.png` | The example course, rendered by `visualize_course.py` |
+| `course_spec.py` | Friction rules (C3), the parametric mid-ramp gap (A3.1), loading a course for any module |
+| `start_pose.py` | Seeded start poses (A1.1) and the robust footprint's room to the walls |
+| `planner_env.py` | Course file to global planner input (bounds, obstacles, start, goal) |
+| `friction_map.py` | `query(x, y) -> (mu_plan, mu_lo)`; the prior map (0.5, 0.3) for stage 2 |
+| `metrics.py` | Per-run evaluation metrics, including the slip rule |
+| `batch.py`, `batch_sim.py` | Batch runner: seeded trials over gaps, variants and controllers, with summaries and plots |
+| `courses/mixed_v1.yaml` | Evaluation course: gateway, mid-ramp barrier with swept gap, passage, friction patches |
+| `courses/mixed_mu03_v1.yaml`, `courses/ramp_mu03_v1.yaml` | Test courses at friction 0.3 everywhere, the robust controller's design point |
 
 Extra dependency over Quadruped-PyMPC: `pip install "shapely>=2.1" pyyaml matplotlib`.
 
@@ -47,7 +55,7 @@ Smoke tests:
 
 | Test | Expected | Measured |
 |---|---|---|
-| Flat ice (μ 0.20), pushed sideways | sliding ratio 0.20 | 0.200 |
+| Flat ice (μ 0.30 since decision C3; 0.20 before), pushed sideways | sliding ratio 0.30 | 0.300 |
 | Standing still on the ramp, all four feet | tan 10° = 0.176 | 0.176 |
 | Ramp snow (μ 0.30), pushed downhill | sliding ratio 0.30 | 0.300 |
 | Pushed toward the left wall | wall collision | `wall_left_lower` |
@@ -72,11 +80,25 @@ downward ray grid over the whole course hits a terrain tile at the correct heigh
    and any polygon, including concave ones or the base surface with holes, splits into triangles.
 3. **Walls on all four sides,** 0.5 m above the local surface, pitched along the ramp. Robot contact with a wall
    or obstacle is logged as a collision.
-4. **Friction classes and seeds.** `low / medium / high` = 0.20 / 0.50 / 0.80, or seeded draws within each class
-   range. A region touching the ramp is never drawn below the 0.25 ramp floor, so one region keeps one friction
-   value on every section. `ramp_stress_test: true` on a region allows going below the floor (down to tan θ).
-5. **Checks that stop a bad course:** ramp friction at or below tan θ, start or goal closer than 0.5 m to a wall,
-   or pieces that don't exactly cover the course.
+4. **Friction classes and seeds (decision C3, `course_spec.py`).** Every surface takes one value from
+   {0.3, 0.4, 0.5, 0.6, 0.7, 0.8}; 0.3 is the lower limit everywhere, flat and ramp. Classes are fixed for the
+   team: `low` 0.3, `medium` 0.5 (seeds draw 0.4 / 0.5 / 0.6), `high` 0.8 (seeds draw 0.7 / 0.8). Base ground is
+   `friction.base` (0.5) and never changes with the seed. An explicit `mu` must be in the set. Course files with
+   the old keys (`friction_classes`, `randomize_ranges`, `ramp_mu_floor`, `base_class`) are rejected with the fix.
+   *(Until task 2.3b: classes 0.20 / 0.50 / 0.80 with continuous seeded ranges and a 0.25 ramp floor.)*
+5. **Checks that stop a bad course:** ramp friction at or below tan θ, start or goal closer than 0.5 m to a wall
+   or than `obstacle_clearance` (default 1.0 m, decision A3.3) to an obstacle, or pieces that don't exactly cover
+   the course.
+5b. **Mid-ramp gap (decision A3.1).** A `mid_ramp_gap` block becomes a barrier attached to the right wall, leaving
+   `gap` to the left wall, plus a `gap_patch` region of class `variant` (`low` or `high`). `terrain_gen`,
+   `visualize_course` and `friction_check` take `--gap` and `--variant`; overridden scenes are named
+   `<course>_g<gap>_<variant>[_s<seed>]`. `planner_env.planner_problem` gives the planner the same obstacles.
+5c. **Start zone and robust footprint room (decision A1.1, `start_pose.py`).** Each course has a `start_zone`;
+   `sample_start(cfg, seed)` draws x, y and yaw uniformly from it, with its own seed. The build checks that every
+   pose in the zone, and the goal at any heading within 15°, leaves each footprint circle 0.53 m from the walls
+   (radius 0.194 + margin 0.05 + tube 0.263 + heading 0.023). Facing along x, that puts the CoM at least 0.763 m
+   from the back and end walls. Goals sit 1.0 m from the end wall (x = 10.91 on the ramp courses, 11.0 on flat_v1). `robust_planning: false` skips this for
+   legacy layouts (`debug_v03`).
 6. **Logger fix: force ratio in the surface frame.** v1 computed |f_xy| / f_z, which is only right on flat
    ground. On the ramp, friction acts along the surface, so v2 splits each foot force into the part along the
    contact normal and the part tangent to it. Test 2 above is the check: world-frame math would give about 0.
@@ -105,9 +127,50 @@ vary with `--seed`. Obstacles can sit on any section, including the ramp: their 
 their full length and their top is at least `height` above the highest surface point under them (checked: a 0.4 m
 obstacle on the ramp stands 0.40 m above the surface on its uphill side and 0.50 m on its downhill side).
 
+## Batch runner (tasks 2.3f to 2.3h)
+
+```bash
+python -m trackC.batch --course trackC/courses/mixed_v1.yaml --gaps 0.6:1.1:0.1 --variants low high \
+    --seeds 20 --controllers nominal robust_follower --workers 2
+python -m trackC.batch --resume data/batch/<timestamp>               # finish an interrupted sweep
+python -m trackC.batch --summarize data/batch/<timestamp> --publish results/batch/<name>
+```
+
+Seed i sets both the friction draw and the start pose (separate generators); every controller gets the same seeds.
+Scenes are built once per (gap, variant, seed); plans once per (tube, gap, seed); each run is its own process.
+Results: `results/<job>.json` per run, then `runs.csv`, `summary.csv`, `summary.md`, `pass_rate.png` and
+`time_to_goal.png` in the run folder (`data/batch/`, ignored by git). `--publish` copies the summaries into the repo.
+
+Controllers available now:
+
+| Name | Plan | Low level | Notes |
+|---|---|---|---|
+| `nominal` | No tube | Per-foot MPC, cones 0.5, path follower at 0.4 m/s | Stage 1 baseline |
+| `robust_follower` | Full tube (0.263 + 0.023 m) | Per-foot MPC, cones at mu_lo = 0.3, path follower at 0.2 m/s | Stands in for `robust` until the mid layer is merged; no tube feedback |
+
+`robust` (mid layer, 2.4), `learned` (3.3) and `oracle` are listed but refused until their pieces land.
+
+`batch_sim.py` is a temporary shim: `run_waypoints.run()` does not yet take a start pose or a path, so the shim
+swaps two of its helpers for that one process. It goes away when the agreed `run()` interface lands.
+
+**Slips** (`metrics.slip_windows`). A foot slips at the first 20 ms window in which it is in contact, the controller
+commands stance (normal force > 10 N), the measured normal force is > 5 N, it moves faster than 0.05 m/s along the
+surface, the commanded friction ratio exceeds the measured one by more than 0.02 (the ground gave less than asked),
+and it did not slow by more than 0.02 m/s (not coasting after landing). The measured ratio in that window is the
+friction label. Landing slides (the foot coasting to a stop after touchdown, 50 ms and 14 mm on median) are not
+slips. Checked on recorded ramp runs: 0.5 ground with cones 0.5, 3 slips labeled 0.50; 0.3 ground with cones 0.3,
+38 slips labeled 0.30; 0.3 ground with cones 0.5, 24 slips labeled 0.30, then a fall.
+
+**Friction pyramid.** Quadruped-PyMPC limits each horizontal force axis separately (|f_x|, |f_y| <= mu f_n), so
+the combined ratio can reach sqrt(2) mu: up to 0.42 with cones at 0.3. That is why the 0.3 / 0.3 run still slips,
+and it breaks decision B4's assumption that cones at mu_lo never ask for more than the ground has. Raised with
+track A; `limit_fraction` measures how often feet sit at the pyramid limit (half the stance time in that run).
+
 ## Not done yet
 
 - Seeded random **layouts** (the sheet's second phase): region shapes and obstacle positions drawn per seed,
   including obstacles on the ramp. Only friction values are seeded so far.
 - Narrow-passage width is a 0.7 m placeholder until the robust tube radius is measured.
-- Slip thresholds (`v_slip`, `k_slip`) need tuning on real walking runs with the MPC.
+- `contact_logger.py` still uses the old slip rule (every landing slide is a slip); it should switch to
+  `metrics.slip_windows` before stage 3 uses its events as friction labels.
+- Batch: tube drift (needs the mid layer's nominal trajectory), `robust`, `learned` and `oracle` controllers.

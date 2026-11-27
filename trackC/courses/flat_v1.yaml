@@ -13,15 +13,13 @@ course:
   lower_flat: {length: 3.0}                    # starts at the back wall, x = 0
   ramp: {length_along_slope: 6.0, angle_deg: 0}
   upper_flat: {length: 3.0}
-  base_class: medium                           # friction of everything not covered by a region
-  ramp_mu_floor: 0.5
   walls: {height: 0.5, thickness: 0.1}
   wall_clearance: 0.5                          # start and goal must be at least this far from every wall
   start: [0.8, 1.5]                            # 0.8 m in front of the back wall, on the centerline
-  goal: [11.3, 1.5]
+  goal: [11.0, 1.5]                            # 1.0 m from the end wall (x = 12.0): team rule, leaves room for the robust footprint
+  start_zone: {x: [0.8, 1.2], y: [0.9, 2.1], yaw_deg: 15}   # seeded starts (A1.1); in line with the 1.2 m gateway, see start_pose.py
 
-friction_classes: {low: 0.20, medium: 0.50, high: 0.80}
-randomize_ranges: {low: [0.15, 0.25], medium: [0.40, 0.60], high: [0.70, 0.90]}
+friction: {base: 0.5}                          # base ground; region classes and the friction set are in trackC/course_spec.py
 
 regions: []
 

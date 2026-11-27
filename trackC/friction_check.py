@@ -18,7 +18,6 @@ import math
 
 import mujoco
 import numpy as np
-import yaml
 
 from trackC.terrain_gen import build
 
@@ -57,9 +56,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("config")
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--gap", type=float, default=None, help="mid-ramp gap width [m] (courses with mid_ramp_gap)")
+    ap.add_argument("--variant", choices=["low", "high"], default=None, help="friction class of the gap patch")
     a = ap.parse_args()
-    cfg = yaml.safe_load(open(a.config))
-    xml, info = build(cfg, a.seed)
+    xml, info = build(a.config, a.seed, gap=a.gap, variant=a.variant)
     course, mu = info["course"], info["mu"]
     print(f"{'surface':<14}{'section':<9}{'mu set':>8}{'measured':>10}")
     for sid, sec, shape in info["pieces"]:
