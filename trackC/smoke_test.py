@@ -3,13 +3,13 @@
 The Go2 is held in its standing pose with joint PD control, placed somewhere on the course, and optionally pushed.
 Each test prints what the logger measured next to what physics says it should be:
 
-  1. flat ice, pushed sideways  -> sliding force ratio r ~ mu of the ice (0.20)
+  1. flat ice, pushed sideways  -> sliding force ratio r ~ mu of the ice region (0.3 under decision C3)
   2. standing still on the ramp -> summed over all four feet, r ~ tan(10 deg) = 0.176: friction must hold the
                                    robot against gravity. This only comes out right if r is measured in the
                                    SURFACE frame. Individual feet read higher (about 0.24 even on flat ground)
                                    because the legs push against each other; those internal forces cancel in the
                                    sum. A single foot's ratio is still a valid lower bound on mu: it did not slip.
-  3. ramp snow, pushed downhill -> sliding force ratio r ~ mu of the snow (0.30)
+  3. ramp snow, pushed downhill -> sliding force ratio r ~ mu of the snow region (0.30)
   4. next to a wall, pushed     -> the logger records a wall collision
 
 Usage (from the repo root): python -m trackC.smoke_test trackC/courses/debug_v03.yaml
@@ -79,7 +79,7 @@ if __name__ == "__main__":
 
     log = run(env, course, 2.0, 0.7, push=(0, 50, 0))        # inside ice_lower
     r, n = ratio(log, sliding=True)
-    print(f"1. flat ice (mu 0.20), pushed: sliding r = {r:.3f} over {n} foot-steps")
+    print(f"1. flat ice (mu {info['mu']['ice_lower']:.2f}), pushed: sliding r = {r:.3f} over {n} foot-steps")
     ev = log.events()
     kinds = sorted({e["kind"] for e in ev})
     leaked = set().union(*(e.keys() for e in log.learner_events())) & {"surface", "straddle", "mu_true"}
@@ -88,13 +88,13 @@ if __name__ == "__main__":
 
     log = run(env, course, 5.4, 2.5, T=1.5)                   # inside dry_ramp
     r_foot, _ = ratio(log, sliding=False, t_window=(0.8, 1.5))
-    print(f"2. standing on dry ramp (mu 0.80): all feet r = {total_ratio(log):.3f}, expected tan(10 deg) = "
+    print(f"2. standing on dry ramp (mu {info['mu']['dry_ramp']:.2f}): all feet r = {total_ratio(log):.3f}, expected tan(10 deg) = "
           f"{math.tan(course.theta):.3f} (single foot median {r_foot:.3f})")
 
     downhill = 60 * np.array([-math.cos(course.theta), 0, -math.sin(course.theta)])
     log = run(env, course, 7.1, 0.5, push=downhill)           # inside snow_ramp
     r, n = ratio(log, sliding=True)
-    print(f"3. ramp snow (mu 0.30), pushed downhill: sliding r = {r:.3f} over {n} foot-steps")
+    print(f"3. ramp snow (mu {info['mu']['snow_ramp']:.2f}), pushed downhill: sliding r = {r:.3f} over {n} foot-steps")
 
     log = run(env, course, 0.5, 2.65, push=(0, 80, 0))       # 0.35 m from the left wall
     walls = sorted({name for _, name in log.collisions})
