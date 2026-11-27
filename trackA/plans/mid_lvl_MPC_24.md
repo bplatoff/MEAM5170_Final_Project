@@ -1,16 +1,16 @@
 # Task 2.4 plan: mid-layer tube MPC and LQR feedback
 
-*Updated Nov 23, 2026, against `master` at `ca7889a`. Owners: Jacob, with Austin.*
+*Updated Nov 26, 2026 (J9 results), on a branch still based on `master` at `ca7889a`. Owners: Jacob, with Austin.*
 
 ## Team summary
 
 **Status (Nov 23):** The three-circle mid layer (QP + LQR) runs full ramp-and-obstacle courses on today's `master`, using temporary patches. Without pushes it reached the goal in **10 of 10** runs with 1.7 m openings and **5 of 5** with 1.25 m openings, with at most **6.3 cm** tracking error and no contact.
 
-**Main open problem:** the tube assumes the robot can reject a 1.96 m/s² shortfall. In simulation it handled sideways pushes of **1.0 m/s² (5 of 5 runs on each course, inside the tube)**, but **fell in 2 of 5 runs at 1.25 m/s²**.
+**Main open problem:** the tube assumes the robot can reject a 1.96 m/s² shortfall. In simulation it handled sideways pushes of **1.0 m/s² (8 of 8 runs on each course, inside the tube)**, but **fell in 4 of 8 runs at 1.25 m/s²** (three circles, carried-nominal QP).
 
 **Footprint (Jacob's decision):** the mid-layer MPC and its planner call now use **three circles by default**, and Austin's planner default should match. With the full tube, this lowers the smallest passable opening from 1.49 m to about **1.06 m**. Narrower gaps should return "no feasible plan" unless task 2.5 shrinks the tube.
 
-**MPC design (Jacob's decision):** the target MPC starts from the **measured state** and grows the tube from zero at every solve. Obstacles are **soft constraints with a large linear penalty**, so the robot still gets a recovery command after a shove beyond the tube. **This version is built but is not the default yet:** it passed the no-push checks but did worse than the carried-nominal QP after some pushes (worst error 71 cm vs 11 cm at 1.0 m/s²). The cause is still open.
+**MPC design (Jacob's decision):** the target MPC starts from the **measured state** and grows the tube from zero at every solve. Obstacles are **soft constraints with a large linear penalty**, so the robot still gets a recovery command after a shove beyond the tube. **This version is built but is not the default:** it passed the no-push checks and never fell at 1.25 m/s² (8 of 8 vs 4 of 8 for the carried-nominal QP), but it did worse at 1.0 m/s² (worst error 75 cm vs 11 cm) and a leg touched the ramp barrier in 3 pushed runs (two of them on seeds where the carried-nominal QP fell). **Stage 2 keeps the carried-nominal QP**, the only version with no contact in any run.
 
 **Needed from Austin and Ben by Wed Nov 25,** so validation can finish before M2 on Nov 27.
 
@@ -23,8 +23,10 @@
 4. ~~`run_waypoints` integration and full-course runs~~ Done
 5. ~~Push tests and logs for task 2.5~~ Done
 6. ~~Switch the MPC and planner call to three circles (J8)~~ Done
-7. **Fix the measured-state MPC** (J9): it is built, but fails "no worse than the carried-nominal QP" after pushes
-8. Improve recovery on the ramp, then integrate teammates' work when it lands
+7. ~~Measured-state MPC comparison (J9)~~ Done Nov 26: fails "no worse than carried" at 1.0 m/s², so the carried-nominal QP stays the default. Cross-track weighting is dropped as a fix for the contacts: in those runs the QP was already pushing sideways at its friction limit (section 0)
+8. **Merge `master` (world frame, 2.3a) into `trackA-2-4`** and open the PR
+9. **Friction limits** (plan: `trackA/plans/friction_limits.md`): replace the low-level pyramid, which allows √2·μ diagonally (Ben, Nov 25), with 8 faces (at least 0.924·μ in every direction); fit the mid layer's polygons inside their circles; subtract δ from the slope and uphill limits. Then try a push margin for the measured-start QP
+10. Improve recovery on the ramp, then integrate teammates' work when it lands
 
 **Austin (by Nov 25)**
 1. **Make three circles the default:** change `footprint_model` to `"three_circle"` in `plan_trajectory` and the `test_planner.py` CLI, and keep `"single_circle"` as an explicit option. All 56 planning tests still pass with the `plan_trajectory` default changed
@@ -34,7 +36,7 @@
 5. Keep `h` a multiple of 0.1 s and choose `T` by searching for the shortest feasible time
 6. **Add a per-section speed limit:** at `μ_lo = 0.3` the robot saturates near 0.24 m/s on the ramp, so plans should use about 0.18 m/s there and can go faster on the flats
 7. **Make the rate-limited `yaw_ref` the default:** start at the measured yaw and limit its rate to 0.5 rad/s (`footprint_yaw` and `footprint_max_yaw_rate` already exist)
-8. Add the friction reserve `δ`, uphill and turn limits, and heading-error inflation
+8. Add the friction reserve `δ`, uphill and turn limits, and heading-error inflation. The uphill limit should include `δ` (`trackA/plans/friction_limits.md`, team decision 1)
 9. Run the disturbance check (2.5) on Jacob's logs
 
 **Ben (by Nov 25)**
@@ -69,9 +71,9 @@
 
 # Detailed plan
 
-## 0. Implementation status (Nov 23)
+## 0. Implementation status (Nov 26)
 
-Built without changes to Track B or Track C code. The one-circle, carried-nominal version is committed and pushed on `trackA-2-4` at `8b0ea34`, and is not merged to `master`. J8 and J9 are built in the working tree and are not committed. The default is three circles with the carried-nominal QP. Run the measured-state version with `--qp-start measured`.
+Built without changes to Track B or Track C code. J8 and J9 are committed and pushed on `trackA-2-4` at `6c15d04` (the one-circle version is `8b0ea34`), and are not merged to `master`. The default is three circles with the carried-nominal QP. Run the measured-state version with `--qp-start measured`.
 
 | Piece | File |
 |---|---|
@@ -126,7 +128,27 @@ Built without changes to Track B or Track C code. The one-circle, carried-nomina
 - **Cause still open.** The largest measured-state errors occur at the ramp barrier, often with the QP at its 1.19 m/s² uphill limit. Raising that limit to what LQR alone would command did not fix it: of the five worst runs, one improved and two became much worse (one fell, one reached 212 cm). That change was removed.
 - **Gain match:** the measured-state QP uses `Q ≈ diag(1033, 1033, 64.6, 64.6)` so its first-step gain equals the LQR gain. With `diag(400, 400, 25, 25)` it was 27% weaker. OSQP uses `eps_rel = 1e-6` and `rho = 0.01`, so large linear penalties do not loosen its stopping test.
 
-**Next for Jacob:** find why the measured-state MPC does worse after ramp pushes, then improve ramp recovery, for example with a dedicated ramp step test and ramp-specific lateral gains.
+**J9 with the slope friction limit (Nov 24 to 26).** The measured-state QP now limits `‖(a_x + g sin θ, a_y)‖ ≤ μ_lo g cos θ`, so uphill and sideways acceleration share one friction budget. Pushed runs only, original seeds 0 to 4 plus fresh seeds 5 to 7; full tables in `trackA/results/mid_layer_j9_friction/summary.md` and `trackA/results/mid_layer_j9_friction_fresh/summary.md`:
+
+| Opening | Push | Carried QP: goal, worst error, runs outside tube, runs with contact | Measured QP: goal, worst error, runs outside tube, runs with contact |
+|---|---|---|---|
+| 1.7 m | 1.0 m/s² | 8/8, 11.0 cm, 0, 0 | 8/8, **75.0 cm**, 1, **1** |
+| 1.7 m | 1.25 m/s² | **4/8** (4 falls), 57.9 cm, 7, 0 | **8/8**, 64.0 cm, 4, **2** |
+| 1.25 m | 1.0 m/s² | 8/8, 23.6 cm, 0, 0 | 8/8, 22.0 cm, 0, 0 |
+
+- **Measured never fell.** At 1.25 m/s² it reached 8 of 8 goals; the carried QP fell in 4 of 8. Both fresh-seed falls were on the 0.3 ramp patch, just before the mid-ramp barrier.
+- **It still fails "no worse than carried".** At 1.0 m/s² on the 1.7 m course, fresh seed 6 left the tube (75 cm) and the front-right leg briefly touched the barrier (foot and calf, 9.4 mm). At 1.25 m/s², original seed 4 and fresh seed 5 also touched the barrier with the front-right leg. The carried QP had no contact in any run.
+- **Slack and solve time.** In pushed runs on the 1.7 m course the measured QP used tube, body and speed slack (up to 9.8 cm of body slack), and 28 to 32 solves per group took over 100 ms (worst 694 ms). The carried QP never used slack and never exceeded 85 ms. Times were measured with 6 runs in parallel, so absolute values are inflated, but both versions ran under the same load.
+- **What the contacts were (logs, Nov 26):** all three are the same event. The body was pushed 34 to 39 cm toward the barrier, past the 26.3 cm tube, and the front-right foot, about 21 cm to the body's right, touched the barrier's inner face (1 to 9 mm, at most 0.22 s). Two of the three are on seeds where the carried-nominal QP fell, so at 1.25 m/s² measured start mostly survived a slide that knocked the carried version over.
+- **Why (partly known):**
+  - During the push, the QP was at its friction limit and mostly pushing sideways; in both 1.25 m/s² runs, entirely sideways.
+  - Its friction limit ignores the push, so it planned about 2.4 m/s² of sideways recovery when the feet could give about 1.35.
+  - Fresh seed 6 at 1.0 m/s² is the only measured-only failure. The robot stumbled and backed down the ramp at up to 0.54 m/s, while the QP kept spending friction sideways and the velocity command followed the slide (−0.44 m/s). Why it stumbled there and the carried version did not is unknown, from one run.
+  - Earlier offline re-solves of two runs without contact found the QP trading sideways push-back for along-track catch-up. That explains their larger error at 1.0 m/s², not the contacts.
+  - Solve-time overruns are not a cause, because the simulation waits for each solve.
+- **Decision:** keep the carried-nominal QP for stage 2, since 2.7 requires no collisions and at 1.0 m/s² it is the only version without contact. Cross-track weighting is dropped as a contact fix. Next comes the friction-limit fix (`trackA/plans/friction_limits.md`), then a push margin for the measured-start QP.
+
+**Next for Jacob:** merge `master` (world frame) and open the PR. Then, both before 2.7 runs: the friction-limit fix (`trackA/plans/friction_limits.md`), and a start pose, path array and the mid-layer controller in `run_waypoints.run()`, so Ben's batch runner can drop its shim and run the `robust` controller. Then end-to-end stage 2 (2.6).
 
 ## 1. What Jacob can do now
 
