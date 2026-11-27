@@ -3,7 +3,8 @@
 Where the work stands against the plan (`docs/plan.md`, Development steps). Update this file in the same PR as
 the work it describes: change the state, add the evidence (PR, test, results file), and bump "Last updated".
 
-**Last updated:** Nov 26, 2026 (tasks 2.3f, 2.3g: metrics and batch runner)  
+**Last updated:** Nov 27, 2026 (task 2.4, mid-layer robust MPC; tasks 2.3b to 2.3g)  
+
 **States:** Done · In progress · Not started · Blocked (say on what)
 
 ## Milestones
@@ -12,7 +13,7 @@ the work it describes: change the state, add the evidence (PR, test, results fil
 |:--|:--|:--|:--|
 | M0 kickoff | Nov 2 | Done | Parameter sheet v0.3, demo runs on every machine |
 | M1 stage 1 | Nov 11 | Done | Merged Nov 20 (PR #5); exit test in `trackA/results/phase1/summary.md` |
-| M2 stage 2 validated | Nov 27 (moved from Nov 24, E1) | At risk | Needs 2.3, 2.4, 2.5, 2.6, 2.7; 2.4 not started |
+| M2 stage 2 validated | Nov 27 (moved from Nov 24, E1) | At risk | 2.4 done. Still needs 2.3, 2.5, 2.6 and 2.7, so it cannot be validated by Nov 27. 2.7 also waits on the friction-limit fix (`trackA/plans/friction_limits.md`) |
 | M3 stage 3 | Dec 3 | Not started | |
 | Code freeze | Dec 5 | | |
 | Submission | Dec 10 | | |
@@ -33,9 +34,9 @@ the work it describes: change the state, add the evidence (PR, test, results fil
 | 2.1 | Error model, LQR K, ellipsoid, ρ < 1 | B | Nov 10 to 13 | Done | `planning/robust_control/tube_error_model.py` (PR #3) |
 | 2.2 | r_w from the shortfall, α_k recursion, radii in meters | B | Nov 12 to 16 | Done | `planning/robust_control/friction_tube.py` (PRs #4, #6); r0 still 0 until 2.5 |
 | 2.3 | Mixed courses, batch runner, metrics | C | Nov 10 to 14 | In progress (late) | Breakdown below; 2.5 needs it by Nov 24 |
-| 2.4 | Mid-layer robust MPC | A, with B | Nov 12 to 23 | In progress | Branch `trackA-2-4`: one-circle mid layer, 10/10 on its test course; three circles (J8) and world-frame fixes in progress |
+| 2.4 | Mid-layer robust MPC | A, with B | Nov 12 to 23 | Done | `trackA/mid_layer/` (QP + LQR, three circles; each QP solve starts from the measured state, `--qp-start carried` keeps the nominal instead), `trackA/sim/run_midlayer.py`, `trackA/sim/compare_midlayer.py`; 43 tests (`python -m unittest trackA.mid_layer.test_mid_layer`). No push: 10/10 goals on 1.7 m openings, at most 5.4 cm error, no contact; after the world-frame merge, seed 3 matches (66.6 s, 5.4 cm), worst QP solve 13 ms run alone (budget 100 ms). Sideways pushes: 8/8 goals at 1.0 and 1.25 m/s², but a front leg touched the ramp barrier in 3 of 24 pushed runs (at most 9 mm), and some pushed solves took over 100 ms with 6 runs in parallel; the carried version had no contact but fell in 4/8 at 1.25 m/s². Plan and results: `trackA/plans/mid_lvl_MPC_24.md`, `trackA/results/mid_layer_j9*/`. Next: friction-limit fix and push margin before 2.7 |
 | 2.5 | Disturbance check (r_w, lag, time at limit, drift, heading) | B | Nov 17 to 24 | Not started | Needs 2.3 runs |
-| 2.6 | End-to-end stage 2 | A | Nov 20 to 25 | Not started | Needs 2.4 and the planner path in the runner |
+| 2.6 | End-to-end stage 2 | A | Nov 20 to 25 | Not started | 2.4 done. Needs `run()` to take a start pose and path array and run the mid layer (Jacob, next; replaces Ben's `batch_sim.py` shim), the friction-limit fix, and Ben's 2.3 branch |
 | 2.7 | Stage 2 validation, 20 seeds per gap | B | Nov 23 to 27 | Not started | Needs 2.5, 2.6 |
 | 3.1 | Emulated probe data | C | Nov 15 to 17 | Not started | |
 | 3.2 | GP on equalities | C | Nov 17 to 21 | Not started | |
@@ -80,7 +81,7 @@ Code and documents written before the decisions that still need changing.
 | `trackC/terrain_gen.py`: discrete friction set, floor 0.3, 1.0 m obstacle clearance check | Ben | Done (2.3b) |
 | Course files: new frame (2.3a) and friction schema (2.3b); new `mixed_v1` (2.3c); `debug_v03` keeps its old layout for the logger tests; Jacob's `midlayer_*` courses need the friction schema change | Ben, Jacob | Done for track C |
 | `visualize_course.py`, `friction_check.py`, `smoke_test.py`: new frame | Ben | Done (2.3a) |
-| `run_waypoints.run()`: absolute start pose and frame-aware drawing and plots (done in 2.3a, needs Jacob's review); path array input, fall vs collision, per-foot μ from the map (to do). Terrain bounds: no change needed, gym-quadruped sets no bounds for custom scenes | Jacob | Partly done |
+| `run_waypoints.run()`: absolute start pose and frame-aware drawing and plots (done in 2.3a; merged into `trackA-2-4` Nov 26). To do: start pose and path array as arguments and the mid layer as a controller (Ben's `batch_sim.py` shim until then); per-foot μ from the map. Fall vs collision: Ben's `trackC/metrics.py` (branch `task-2.3bce-friction-mixed`). Terrain bounds: no change needed, gym-quadruped sets no bounds for custom scenes | Jacob | Partly done |
 | `robust_two_pass.py`: return "no feasible plan" instead of raising | Austin | Not started |
 | `predict_contacts` for the two-pass planner (owner to agree) | Austin or Ben | Not started |
 | Parameter sheet v0.4 | Ben | Not started |

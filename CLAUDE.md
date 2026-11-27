@@ -14,8 +14,10 @@ environment, data and learning).
 1. **Global planner** (`planning/`): direct collocation on a point-mass model, three-circle footprint, two passes
    (plan, propagate the tube, replan with footprint + 0.05 m margin + largest tube radius). Outputs desired
    position and velocity.
-2. **Mid-layer robust MPC** (task 2.4, not built yet): point mass, about 2 s horizon, keeps its nominal trajectory,
-   LQR feedback a_cmd = a_nom + K (x_meas − x_nom), sends v_cmd = v_meas + dt · a_cmd and yaw rate.
+2. **Mid-layer robust MPC** (task 2.4, `trackA/mid_layer/`, run with `python -m trackA.sim.run_midlayer`): point
+   mass, 2 s horizon, three-circle footprint. Each QP solve starts from the measured state (`--qp-start carried`
+   keeps the nominal trajectory instead), LQR feedback a_cmd = a_nom + K (x_meas − x_nom), converted to a velocity
+   command that inverts the measured velocity lag (B3, revised Nov 26), plus yaw rate.
 3. **Low level**: Quadruped-PyMPC (`controllers/centroidal_nmpc_nominal_1_4.py` adds per-foot friction, wall
    half-spaces and slope-aware cones). Friction cones use μ_lo per foot.
 
@@ -62,6 +64,7 @@ python -m trackA.reference.test_path_follower
 python -m controllers.test_1_4_hooks
 python -m planning.test_planner --scenario multi --no-plot
 python -m unittest discover -s planning -t . -p "test_*.py"   # planner, footprint, tube (about 40 s)
+python -m unittest trackA.mid_layer.test_mid_layer            # mid layer (43 tests)
 ```
 
 Setup details and the PR review procedure are in `SETUP.md`.
