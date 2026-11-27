@@ -191,8 +191,12 @@ def main():
     parser.add_argument("--mu", type=float, default=0.50)
     parser.add_argument("--N", type=int, default=30)
     parser.add_argument("--T", type=float, default=12.0)
+    parser.add_argument("--auto-horizon", action="store_true", help="set fixed T from A* route length")
+    parser.add_argument("--cruise-speed", type=float, default=0.4, help="A* length / cruise speed [m/s]")
+    parser.add_argument("--time-buffer", type=float, default=2.0, help="extra time for turns/start/stop [s]")
     parser.add_argument("--max-speed", type=float, default=1.0)
     parser.add_argument("--no-plot", action="store_true")
+    parser.add_argument("--astar-resolution", type=float, default=0.05)
     parser.add_argument("--footprint-model", choices=["single_circle", "three_circle"], default="single_circle")
     parser.add_argument("--yaw-mode", choices=["fixed", "path_tangent"], default="path_tangent")
     parser.add_argument("--fixed-yaw", type=float, default=0.0)
@@ -205,13 +209,16 @@ def main():
     config = {
         "N": args.N,
         "T": args.T,
+        "horizon_mode": "astar_length" if args.auto_horizon else "fixed",
+        "cruise_speed_mps": args.cruise_speed,
+        "time_buffer_s": args.time_buffer,
         "max_speed": args.max_speed,
         "friction_mu": args.mu,
         "smoothness_weight": args.smoothness_weight,
         "robot_length": 0.7,
         "robot_width": 0.31,
         "r_safety": 0.05,
-        "astar_resolution": 0.1,
+        "astar_resolution": args.astar_resolution,
         "astar_clearance": 0.01,
         "footprint_model": args.footprint_model,
         "footprint_yaw_mode": args.yaw_mode,

@@ -78,7 +78,7 @@ def load_course(path) -> CourseGeometry:
         (x, y), (length, width) = o["center"], o["size"]
         xa, xb, ya, yb = x - length / 2, x + length / 2, y - width / 2, y + width / 2
         obstacles.append(np.array([[xa, ya], [xb, ya], [xb, yb], [xa, yb]], dtype=float))  # counter-clockwise
-    bounds = (course.x0, course.x3, -course.width / 2, course.width / 2)
+    bounds = (course.x0, course.x3, course.y0, course.y1)     # inner wall faces, world frame (A1)
     return CourseGeometry(cfg["name"], course, bounds, obstacles, np.asarray(c["goal"], dtype=float))
 
 

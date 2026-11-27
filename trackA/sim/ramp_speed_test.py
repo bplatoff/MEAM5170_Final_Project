@@ -1,6 +1,6 @@
 """Measure the forward speed Quadruped-PyMPC actually reaches on the 10 degree ramp for each commanded speed.
 
-The robot walks to the ramp, then holds each command for several gait cycles while a small loop keeps y and yaw near 0.
+The robot walks to the ramp, then holds each command for several gait cycles while a small loop keeps the robot on the centerline (y = 1.5) with yaw near 0.
 The steady speed is averaged over whole gait cycles.
 
 Run from the repo root, inside the pixi env:
@@ -17,7 +17,7 @@ from trackA.sim.run_midlayer import ensure_scene
 
 COURSE = "trackA/courses/midlayer_ramp_v1.yaml"
 GAIT_PERIOD = 1.0 / 1.4
-RAMP_START, RAMP_END = 2.3, 7.7     # [m] measure only well inside the ramp
+RAMP_START, RAMP_END = 3.3, 8.7     # [m] measure only well inside the ramp
 COMMANDS = (0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.60)
 HOLD_CYCLES = 7
 SETTLE_CYCLES = 3                   # cycles discarded at the start of each hold
@@ -27,7 +27,7 @@ class RampCommand:
     log_keys = ("ramp_cmd", "ramp_level")
 
     def __init__(self, spawn_xy):
-        self.waypoints = np.array([spawn_xy, [RAMP_END, 0.0]])
+        self.waypoints = np.array([spawn_xy, [RAMP_END, 1.5]])   # along the centerline, y = 1.5
         self.seg_idx, self.cross_track_error = 0, 0.0
         self.t_ramp, self.cmd, self.level = None, 0.3, -1
 
@@ -45,7 +45,7 @@ class RampCommand:
                 return np.zeros(3), np.zeros(3), True
             self.cmd = COMMANDS[self.level]
         done = bool(pos_xy[0] >= RAMP_END)
-        vy = float(np.clip(-1.0 * pos_xy[1], -0.15, 0.15))
+        vy = float(np.clip(-1.0 * (pos_xy[1] - 1.5), -0.15, 0.15))   # hold the centerline, y = 1.5
         w = float(np.clip(-1.5 * yaw, -0.6, 0.6))
         return np.array([self.cmd, vy, 0.0]), np.array([0.0, 0.0, w]), done
 

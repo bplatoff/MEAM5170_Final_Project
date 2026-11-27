@@ -35,3 +35,6 @@ scene_*.xml
 .vscode/
 .idea/
 *.swp
+
+# Personal Claude Code instructions (each person keeps their own)
+CLAUDE.local.md

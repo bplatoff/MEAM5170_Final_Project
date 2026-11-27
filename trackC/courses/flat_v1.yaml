@@ -1,32 +1,28 @@
-# Hand-designed debug course matching parameter sheet v0.3.
-# Plan-view coordinates: x along the course, y across it. The Go2 spawns at (0, 0).
-
-# generate terrain: python -m trackC.terrain_gen trackC/courses/flat_v1.yaml
-# generate plan view png: python -m trackC.visualize_course trackC/courses/flat_v1.yaml --out flat_v1.png
-
-# 3D viewer
-# python -m trackC.terrain_gen trackC/courses/flat_v1.yaml --out /tmp/scene_flat_v1.xml
-# python -m mujoco.viewer --mjcf=/tmp/scene_flat_v1.xml
-
+# Flat course, one friction value everywhere (stage 1). Same footprint as the ramp courses with the ramp set to 0 deg.
+# World frame (decision A1): origin at the back-right inner wall corner; x forward, y left (0 to 3 m), z up.
+#
+# Build the scene:        python -m trackC.terrain_gen trackC/courses/flat_v1.yaml
+# Plan view png:          python -m trackC.visualize_course trackC/courses/flat_v1.yaml --out flat_v1.png
+# 3D viewer:              python -m trackC.terrain_gen trackC/courses/flat_v1.yaml --out /tmp/scene_flat_v1.xml
+#                         python -m mujoco.viewer --mjcf=/tmp/scene_flat_v1.xml
 
 name: flat_v1
 
 course:
-  width: 3.0                                   # between inner wall faces
-  lower_flat: {start: -0.8, length: 3.0}       # back wall 0.8 m behind the spawn point
+  width: 3.0                                   # between inner wall faces: y from 0 (right) to 3 (left)
+  lower_flat: {length: 3.0}                    # starts at the back wall, x = 0
   ramp: {length_along_slope: 6.0, angle_deg: 0}
   upper_flat: {length: 3.0}
   base_class: medium                           # friction of everything not covered by a region
-  ramp_mu_floor: 0.5                         
+  ramp_mu_floor: 0.5
   walls: {height: 0.5, thickness: 0.1}
   wall_clearance: 0.5                          # start and goal must be at least this far from every wall
-  start: [0.0, 0.0]
-  goal: [10.5, 0.0]
+  start: [0.8, 1.5]                            # 0.8 m in front of the back wall, on the centerline
+  goal: [11.3, 1.5]
 
 friction_classes: {low: 0.20, medium: 0.50, high: 0.80}
 randomize_ranges: {low: [0.15, 0.25], medium: [0.40, 0.60], high: [0.70, 0.90]}
 
 regions: []
-
 
 obstacles: []

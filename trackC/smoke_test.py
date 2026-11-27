@@ -13,6 +13,9 @@ Each test prints what the logger measured next to what physics says it should be
   4. next to a wall, pushed     -> the logger records a wall collision
 
 Usage (from the repo root): python -m trackC.smoke_test trackC/courses/debug_v03.yaml
+
+The test positions below are picked inside debug_v03's regions, in the world frame (origin at the back-right inner
+wall corner, y from 0 to 3 m). They only make sense on debug_v03.
 """
 import math
 import sys
@@ -74,7 +77,7 @@ if __name__ == "__main__":
     course = info["course"]
     env = QuadrupedEnv(robot="go2", scene=info["name"], ground_friction_coeff=0.5, ref_base_lin_vel=0.0)
 
-    log = run(env, course, 1.2, -0.8, push=(0, 50, 0))
+    log = run(env, course, 2.0, 0.7, push=(0, 50, 0))        # inside ice_lower
     r, n = ratio(log, sliding=True)
     print(f"1. flat ice (mu 0.20), pushed: sliding r = {r:.3f} over {n} foot-steps")
     ev = log.events()
@@ -83,16 +86,16 @@ if __name__ == "__main__":
     print(f"   stance events: {len(ev)}, kinds {kinds} (only hold/slip allowed), "
           f"straddles flagged {sum(e['straddle'] for e in ev)}, eval fields visible to learner: {sorted(leaked) or 'none'}")
 
-    log = run(env, course, 4.6, 1.0, T=1.5)
+    log = run(env, course, 5.4, 2.5, T=1.5)                   # inside dry_ramp
     r_foot, _ = ratio(log, sliding=False, t_window=(0.8, 1.5))
     print(f"2. standing on dry ramp (mu 0.80): all feet r = {total_ratio(log):.3f}, expected tan(10 deg) = "
           f"{math.tan(course.theta):.3f} (single foot median {r_foot:.3f})")
 
     downhill = 60 * np.array([-math.cos(course.theta), 0, -math.sin(course.theta)])
-    log = run(env, course, 6.3, -1.0, push=downhill)
+    log = run(env, course, 7.1, 0.5, push=downhill)           # inside snow_ramp
     r, n = ratio(log, sliding=True)
     print(f"3. ramp snow (mu 0.30), pushed downhill: sliding r = {r:.3f} over {n} foot-steps")
 
-    log = run(env, course, -0.3, 1.15, push=(0, 80, 0))
+    log = run(env, course, 0.5, 2.65, push=(0, 80, 0))       # 0.35 m from the left wall
     walls = sorted({name for _, name in log.collisions})
     print(f"4. pushed toward the left wall: collisions with {walls}")

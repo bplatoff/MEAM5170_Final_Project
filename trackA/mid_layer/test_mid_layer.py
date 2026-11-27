@@ -41,7 +41,7 @@ def straight_reference(speed=0.4, T=12.0, h=0.4, ramp=1.0):
 
 
 def open_geometry(obstacles=(), bounds=(-2.0, 20.0, -3.0, 3.0)):
-    course = Course(dict(width=6.0, lower_flat=dict(start=-2.0, length=7.0),
+    course = Course(dict(width=6.0, lower_flat=dict(length=7.0),
                          ramp=dict(length_along_slope=7.0, angle_deg=0), upper_flat=dict(length=8.0)))
     return CourseGeometry("test", course, bounds, list(obstacles), np.array([0.0, 0.0]))
 

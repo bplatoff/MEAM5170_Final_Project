@@ -1,17 +1,18 @@
 # Track A probe course for trackA/sim/ramp_speed_test.py: the course profile with no obstacles and uniform friction.
+# World frame (A1): origin at the back-right inner wall corner. Moved from the old frame by (+1.0, +1.5).
 name: midlayer_ramp_v1
 
 course:
   width: 3.0
-  lower_flat: {start: -1.0, length: 3.0}
+  lower_flat: {length: 3.0}                    # starts at the back wall, x = 0
   ramp: {length_along_slope: 6.0, angle_deg: 10}
   upper_flat: {length: 3.0}
   base_class: medium
   ramp_mu_floor: 0.30
   walls: {height: 0.5, thickness: 0.1}
   wall_clearance: 0.5
-  start: [0.0, 0.0]
-  goal: [10.0, 0.0]
+  start: [1, 1.5]
+  goal: [11, 1.5]
 
 friction_classes: {low: 0.30, medium: 0.50, high: 0.80}
 randomize_ranges: {low: [0.30, 0.30], medium: [0.50, 0.50], high: [0.70, 0.80]}

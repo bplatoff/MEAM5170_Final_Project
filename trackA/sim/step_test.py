@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 
 GAIT_PERIOD = 1.0 / 1.4         # [s] trot step frequency in the Quadruped-PyMPC config
-HOME = np.array([3.0, 0.0])     # [m] on flat_v1, at least 1.5 m from every wall
+HOME = np.array([3.8, 1.5])     # [m] on flat_v1 (world frame, centerline), at least 1.5 m from every wall
 WALK_HOME = 14.0                # [s] time to reach HOME before the first step
 RECENTER_CYCLES = 4             # gait cycles walking back to HOME after a step
 QUIET_CYCLES = 2                # gait cycles of zero command before the next step
