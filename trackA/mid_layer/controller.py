@@ -1,14 +1,16 @@
-"""Mid-layer tube controller (task 2.4): nominal QP at 10 Hz, LQR feedback and yaw loop at 50 Hz.
+"""Mid-layer tube controller (task 2.4): QP at 10 Hz, LQR feedback and yaw loop at 50 Hz.
 
 update() has the same outputs as PathFollower.update(), plus it takes the measured velocity:
     ref_lin_vel, ref_ang_vel, done = mid_layer.update(base_pos[:2], base_lin_vel[:2], yaw, sim_dt)
 
-With cfg.use_qp = False the nominal is the planner's reference and only LQR acts.
+With cfg.use_qp = False the nominal is the planner's reference and only LQR acts. With cfg.qp_start = "measured" each
+successful solve restarts the nominal at the measured state and the tube at zero. With "carried" the nominal is never reset.
 """
 import numpy as np
 
 from trackA.mid_layer.feedback import lqr_acceleration, velocity_command, yaw_rate_command
 from trackA.mid_layer.nominal_qp import NominalQP
+from trackA.mid_layer.reference import wrap_to_pi
 from trackA.mid_layer.tube import TubeTracker
 
 SLACK_TOL = 1e-3        # [m] above this the solve no longer supports the guarantee
@@ -16,7 +18,8 @@ QP_BUDGET = 0.10        # [s]
 RADIUS_TOL = 1e-3       # [m]
 
 LOG_KEYS = ("mid_x_nom", "mid_a_nom", "mid_a_cmd", "mid_v_cmd", "mid_w_cmd", "mid_yaw_ref", "mid_tube_alpha",
-            "mid_tube_radius", "mid_e_pnorm", "mid_pos_error", "mid_qp_time", "mid_qp_slack", "mid_qp_fallback",
+            "mid_tube_radius", "mid_e_pnorm", "mid_pos_error", "mid_ref_error", "mid_yaw_error", "mid_qp_time",
+            "mid_qp_slack", "mid_qp_slack_tube", "mid_qp_slack_body", "mid_qp_slack_speed", "mid_qp_fallback",
             "mid_qp_overrun", "mid_tube_violation", "mid_cmd_saturated")
 
 
@@ -37,8 +40,10 @@ class TubeMidLayer:
         self.done = False
 
         self.qp = None
+        self.measured = cfg.use_qp and cfg.qp_start == "measured"
         if cfg.use_qp:
-            self.qp = NominalQP(cfg, plan.geometry.bounds, plan.geometry.obstacles, slope_at=plan.geometry.slope_at)
+            self.qp = NominalQP(cfg, plan.geometry.bounds, plan.geometry.obstacles, offsets=cfg.circle_offsets,
+                                slope_at=plan.geometry.slope_at)
         self.step_count = 0
         self.fb_count = 0
         self.fb_every = self.qp_every = None
@@ -47,17 +52,19 @@ class TubeMidLayer:
         self.a_nom = self.ref.accel(0.0)
         self.plan_x = self.plan_a = None
         self.v_cmd, self.w_cmd = np.zeros(2), 0.0
-        self.counters = dict(qp_solves=0, qp_fallbacks=0, qp_overruns=0, slack_solves=0, tube_violations=0,
-                             saturated=0, updates=0)
+        self.counters = dict(qp_solves=0, qp_fallbacks=0, qp_overruns=0, slack_solves=0, tube_slack_solves=0,
+                             body_slack_solves=0, speed_slack_solves=0, tube_violations=0, saturated=0, updates=0)
         self.qp_times = []
         self.max_slack = 0.0
+        self.max_slack_tube = self.max_slack_body = self.max_slack_speed = 0.0
         self._row = self._empty_row()
 
     def _empty_row(self):
         return dict(mid_x_nom=self.x_nom.copy(), mid_a_nom=np.zeros(2), mid_a_cmd=np.zeros(2), mid_v_cmd=np.zeros(2),
                     mid_w_cmd=0.0, mid_yaw_ref=self.ref.yaw(0.0), mid_tube_alpha=0.0, mid_tube_radius=0.0,
-                    mid_e_pnorm=0.0, mid_pos_error=0.0, mid_qp_time=0.0, mid_qp_slack=0.0, mid_qp_fallback=False,
-                    mid_qp_overrun=False, mid_tube_violation=False, mid_cmd_saturated=False)
+                    mid_e_pnorm=0.0, mid_pos_error=0.0, mid_ref_error=0.0, mid_yaw_error=0.0, mid_qp_time=0.0,
+                    mid_qp_slack=0.0, mid_qp_slack_tube=0.0, mid_qp_slack_body=0.0, mid_qp_slack_speed=0.0,
+                    mid_qp_fallback=False, mid_qp_overrun=False, mid_tube_violation=False, mid_cmd_saturated=False)
 
     def log_row(self):
         return self._row
@@ -75,7 +82,7 @@ class TubeMidLayer:
             return np.zeros(3), np.zeros(3), True
 
         if self.step_count % self.qp_every == 0:
-            self._update_nominal_plan()
+            self._update_nominal_plan(np.r_[pos_xy, vel_xy].astype(float))
         if self.step_count % self.fb_every == 0:
             self._feedback(np.asarray(pos_xy, float), np.asarray(vel_xy, float), float(yaw))
         self.step_count += 1
@@ -96,29 +103,42 @@ class TubeMidLayer:
         return (np.array([self.ref.state(s) for s in times]), np.array([self.ref.accel(s) for s in times[:-1]]),
                 np.array([self.ref.yaw(s) for s in times]))
 
-    def _update_nominal_plan(self):
-        if self.qp is None or self.t_nom >= self.ref.t_end:
+    def _update_nominal_plan(self, x_meas):
+        if self._follows_reference():
             self.x_nom, self.a_nom = self.ref.state(self.t_nom), self.ref.accel(self.t_nom)
             return
         x_ref, a_ref, yaw_ref = self._reference_horizon()
-        radii = self.tube.stage_radii(self.cfg.horizon, self.cfg.qp_substeps)
+        radii = self.tube.stage_radii(self.cfg.horizon, self.cfg.qp_substeps, alpha0=0.0 if self.measured else None)
         allowed = self.plan.tube_radius + self.plan.info.get("r_extra", 0.0) + RADIUS_TOL
         if radii.max() > allowed:
             raise ValueError(f"tube radius {radii.max():.4f} m exceeds the planner's inflation {allowed:.4f} m")
         prev = None
-        if self.plan_x is not None:
+        if not self.measured and self.plan_x is not None:
             prev = np.vstack((self.plan_x[1:, :2], x_ref[-1, :2]))
-        sol = self.qp.solve(self.x_nom, x_ref, a_ref, yaw_ref, self.plan.circle_radius, radii, prev)
+        x0 = x_meas if self.measured else self.x_nom
+        sol = self.qp.solve(x0, x_ref, a_ref, yaw_ref, self.plan.circle_radius, radii, prev)
         self.counters["qp_solves"] += 1
         self.qp_times.append(sol.solve_time)
         overrun = sol.solve_time > QP_BUDGET
         self.counters["qp_overruns"] += int(overrun)
         slack = float(sol.slack.max()) if sol.success else 0.0
+        s_t = float(sol.slack_tube.max()) if sol.success else 0.0
+        s_b = float(sol.slack_body.max()) if sol.success else 0.0
+        s_v = float(sol.slack_speed.max()) if sol.success else 0.0
         if sol.success:
             self.plan_x, self.plan_a = sol.x, sol.a
             self.a_nom = sol.a[0].copy()
+            if self.measured:
+                self.x_nom = x_meas.copy()
+                self.tube.alpha = 0.0
             self.max_slack = max(self.max_slack, slack)
+            self.max_slack_tube = max(self.max_slack_tube, s_t)
+            self.max_slack_body = max(self.max_slack_body, s_b)
+            self.max_slack_speed = max(self.max_slack_speed, s_v)
             self.counters["slack_solves"] += int(slack > SLACK_TOL)
+            self.counters["tube_slack_solves"] += int(s_t > SLACK_TOL)
+            self.counters["body_slack_solves"] += int(s_b > SLACK_TOL)
+            self.counters["speed_slack_solves"] += int(s_v > SLACK_TOL)
         else:
             self.counters["qp_fallbacks"] += 1
             if self.plan_a is not None:                         # keep the previous plan, one stage later
@@ -127,12 +147,16 @@ class TubeMidLayer:
                 self.a_nom = self.plan_a[0].copy()
             else:
                 self.a_nom = a_ref[0].copy()
-        self._row.update(mid_qp_time=sol.solve_time, mid_qp_slack=slack, mid_qp_fallback=not sol.success,
-                         mid_qp_overrun=overrun)
+        self._row.update(mid_qp_time=sol.solve_time, mid_qp_slack=slack, mid_qp_slack_tube=s_t, mid_qp_slack_body=s_b,
+                         mid_qp_slack_speed=s_v, mid_qp_fallback=not sol.success, mid_qp_overrun=overrun)
+
+    def _follows_reference(self):
+        """True when the nominal is simply the planner's reference: LQR only, or a carried QP after the plan's end."""
+        return self.qp is None or (not self.measured and self.t_nom >= self.ref.t_end)
 
     # ------------------------------------------------------------------ feedback
     def _feedback(self, pos, vel, yaw):
-        if self.qp is None or self.t_nom >= self.ref.t_end:
+        if self._follows_reference():
             self.x_nom, self.a_nom = self.ref.state(self.t_nom), self.ref.accel(self.t_nom)
         x_meas = np.r_[pos, vel]
         e = x_meas - self.x_nom
@@ -140,6 +164,8 @@ class TubeMidLayer:
         self.v_cmd, saturated = velocity_command(vel, a_cmd, yaw, self.cfg, on_ramp=self.plan.geometry.slope_at(pos[0]) > 0.0)
         yaw_ref = self.ref.yaw(self.t_nom)
         self.w_cmd = yaw_rate_command(yaw_ref, self.ref.yaw_rate(self.t_nom), yaw, self.cfg)
+        ref_error = float(np.linalg.norm(pos - self.ref.state(self.t_nom)[:2]))
+        yaw_error = abs(float(wrap_to_pi(yaw_ref - yaw)))
 
         e_norm = self.tube.error_norm(e)
         violation = e_norm > self.tube.alpha + 1e-9
@@ -155,7 +181,8 @@ class TubeMidLayer:
         self._row.update(mid_x_nom=self.x_nom.copy(), mid_a_nom=self.a_nom.copy(), mid_a_cmd=a_cmd.copy(),
                          mid_v_cmd=self.v_cmd.copy(), mid_w_cmd=self.w_cmd, mid_yaw_ref=yaw_ref,
                          mid_tube_alpha=self.tube.alpha, mid_tube_radius=self.tube.radius(self.tube.alpha),
-                         mid_e_pnorm=e_norm, mid_pos_error=float(np.linalg.norm(e[:2])),
+                         mid_e_pnorm=e_norm, mid_pos_error=float(np.linalg.norm(e[:2])), mid_ref_error=ref_error,
+                         mid_yaw_error=yaw_error,
                          mid_tube_violation=violation, mid_cmd_saturated=saturated)
 
         self.x_nom = self.A_fb @ self.x_nom + self.B_fb @ self.a_nom
@@ -165,7 +192,8 @@ class TubeMidLayer:
 
     def summary(self):
         times = np.asarray(self.qp_times) * 1e3
-        out = dict(self.counters, max_slack_m=self.max_slack)
+        out = dict(self.counters, max_slack_m=self.max_slack, max_tube_slack_m=self.max_slack_tube,
+                   max_body_slack_m=self.max_slack_body, max_speed_slack=self.max_slack_speed)
         if times.size:
             out.update(qp_ms_median=float(np.median(times)), qp_ms_p99=float(np.percentile(times, 99)),
                        qp_ms_max=float(times.max()))

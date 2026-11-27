@@ -47,9 +47,13 @@ class TubeTracker:
     def step(self) -> None:
         self.alpha = self.rho * self.alpha + self.r_w
 
-    def stage_radii(self, horizon: int, substeps: int) -> np.ndarray:
-        """Position radius [m] for QP stages 0..horizon: the largest value in the LQR steps leading up to each stage."""
-        alpha = propagate_tube(np.full(horizon * substeps, self.r_w), self.rho, self.alpha)
+    def stage_radii(self, horizon: int, substeps: int, alpha0=None) -> np.ndarray:
+        """Position radius [m] for QP stages 0..horizon: the largest value in the LQR steps leading up to each stage.
+
+        The tube starts from the current alpha, or from alpha0 if given (0 for a solve that starts at the measured state).
+        """
+        start = self.alpha if alpha0 is None else float(alpha0)
+        alpha = propagate_tube(np.full(horizon * substeps, self.r_w), self.rho, start)
         radii = p_norm_to_position_radius(alpha, self.P)
         out = np.empty(horizon + 1)
         out[0] = radii[0]

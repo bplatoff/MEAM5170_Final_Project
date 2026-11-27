@@ -1,0 +1,39 @@
+# Track A test course for the three-circle mid layer (task 2.4, step J8). Temporary: replaced by Track C's mixed_v1.
+# Same profile, friction patches, and frame as midlayer_test_v1, with every opening narrowed from 1.7 m to 1.25 m.
+#
+# One circle plus the tube needs 1.49 m, so only the three-circle footprint fits. Three circles with the full tube and
+# yaw margin need 2 * (0.194 + 0.05 + 0.263 + 0.023) = 1.06 m. Openings of 1.2 m or less still need Track B's A* fix.
+# The barrier's opening is away from the side wall because A* turns in place and cannot do that beside a wall at 1.25 m.
+#
+# Install the scene once per environment:
+#   python -m trackC.terrain_gen trackA/courses/midlayer_gap125_v1.yaml
+
+name: midlayer_gap125_v1
+
+course:
+  width: 3.0
+  lower_flat: {start: -1.0, length: 3.0}
+  ramp: {length_along_slope: 6.0, angle_deg: 10}
+  upper_flat: {length: 3.0}
+  base_class: medium
+  ramp_mu_floor: 0.30
+  walls: {height: 0.5, thickness: 0.1}
+  wall_clearance: 0.5
+  start: [0.0, 0.0]
+  goal: [10.0, 0.0]
+
+friction_classes: {low: 0.30, medium: 0.50, high: 0.80}
+randomize_ranges: {low: [0.30, 0.30], medium: [0.50, 0.50], high: [0.70, 0.80]}
+
+regions:
+  - {id: low_gate,    mu: 0.30, polygon: [[1.0, -0.9], [2.4, -0.9], [2.4, 0.9], [1.0, 0.9]]}
+  - {id: low_barrier, mu: 0.30, polygon: [[4.2, -0.3], [6.0, -0.3], [6.0, 1.1], [4.2, 1.1]]}
+  - {id: high_ramp,   mu: 0.80, polygon: [[6.5, -1.5], [7.7, -1.5], [7.7, -0.2], [6.5, -0.2]]}
+
+obstacles:
+  - {id: gate_right, center: [1.75, -1.0625], size: [0.2, 0.875], height: 0.4}
+  - {id: gate_left,  center: [1.75,  1.0625], size: [0.2, 0.875], height: 0.4}
+  - {id: barrier_right, center: [5.1, -0.8625], size: [0.3, 1.275], height: 0.4}
+  - {id: barrier_left,  center: [5.1,  1.2625], size: [0.3, 0.475], height: 0.4}
+  - {id: pass_right, center: [9.1, -1.0625],  size: [0.2, 0.875], height: 0.4}
+  - {id: pass_left,  center: [9.1,  1.0625],  size: [0.2, 0.875], height: 0.4}

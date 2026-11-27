@@ -1,13 +1,15 @@
 """Temporary bridge from a course file to Track B's collocation planner, so full runs work before stage 2 integration.
 
 The patches here replace work that Track B and Track C still own, without editing their code:
-  * one 0.483 m circle and one tube-inflated pass, instead of the three-circle two-pass planner
+  * one tube-inflated pass with the three-circle footprint, instead of the two-pass planner
+  * the three-circle settings passed explicitly, because the planner's default is still one circle
+  * the yaw-error margin added to the planner's tube margin, because the planner has no heading term
   * a constant tube computed directly, instead of predict_contacts
   * acceleration limited through environment.friction_mu
   * one speed limit for the whole course, set by the ramp, because the planner has no per-section speed limit
   * T from the route length, retried if the solve fails
   * every plan checked on a 0.02 s grid, with the margin raised if it cuts a constraint between samples
-  * yaw from the heading between knots
+  * yaw from the heading between knots, only with the one-circle comparison footprint
   * "no feasible plan" returned as a status
   * bounds and obstacles read from the course file in whatever frame it uses
 """
@@ -21,6 +23,7 @@ import numpy as np
 import yaml
 
 from planning.direct_collocation import plan_trajectory
+from planning.footprint_astar import astar_three_circle_path
 from planning.planner_helpers import astar_initial_path, polygon_halfspaces
 from planning.robust_control.friction_tube import compute_friction_tube_position_radii
 from planning.robust_control.tube_error_model import design_tube_error_model
@@ -101,14 +104,21 @@ def constant_tube_radius(T: float, cfg, model=None) -> float:
     return float(radii.max())
 
 
-def clearance(reference: PlannerReference, geometry: CourseGeometry, radius: float, dt: float = CHECK_DT) -> float:
-    """Smallest slack of the plan to the walls and obstacles inflated by radius, sampled every dt."""
+def clearance(reference: PlannerReference, geometry: CourseGeometry, radius: float, dt: float = CHECK_DT,
+              circle_offsets=(0.0,)) -> float:
+    """Smallest slack of every footprint circle to the walls and obstacles inflated by radius, sampled every dt."""
     x_lo, x_hi, y_lo, y_hi = geometry.bounds
     faces = [polygon_halfspaces(o, radius) for o in geometry.obstacles]
-    p = np.array([reference.state(s)[:2] for s in np.arange(0.0, reference.t_end + 1e-9, dt)])
-    best = float(np.min([p[:, 0] - x_lo, x_hi - p[:, 0], p[:, 1] - y_lo, y_hi - p[:, 1]]) - radius)
-    for normals, offsets in faces:
-        best = min(best, float(np.min(np.max(p @ normals.T - offsets, axis=1))))
+    times = np.arange(0.0, reference.t_end + 1e-9, dt)
+    p = np.array([reference.state(s)[:2] for s in times])
+    yaw = np.array([reference.yaw(s) for s in times])
+    along = np.column_stack((np.cos(yaw), np.sin(yaw)))
+    best = np.inf
+    for s in np.asarray(circle_offsets, dtype=float):
+        c = p + s * along
+        best = min(best, float(np.min([c[:, 0] - x_lo, x_hi - c[:, 0], c[:, 1] - y_lo, y_hi - c[:, 1]]) - radius))
+        for normals, offsets in faces:
+            best = min(best, float(np.min(np.max(c @ normals.T - offsets, axis=1))))
     return best
 
 
@@ -127,13 +137,22 @@ def _quiet():
         os.close(saved)
 
 
-def route_length(start, goal, geometry: CourseGeometry, inflation: float) -> float:
-    x_lo, x_hi, y_lo, y_hi = geometry.bounds
-    path = astar_initial_path(
-        start_state=np.r_[start, 0.0, 0.0], goal_state=np.r_[goal, 0.0, 0.0],
-        bounds=(x_lo + inflation, x_hi - inflation, y_lo + inflation, y_hi - inflation),
-        obstacles=geometry.obstacles, inflation_radius=inflation, resolution=0.1, extra_clearance=0.01,
-    )
+def route_length(start, goal, geometry: CourseGeometry, tube: float, cfg) -> float:
+    """Length of the A* route for the configured footprint, with the tube and the yaw margin."""
+    start_state, goal_state = np.r_[start, 0.0, 0.0], np.r_[goal, 0.0, 0.0]
+    if cfg.footprint == "three_circle":
+        path = astar_three_circle_path(
+            start_state, goal_state, geometry.bounds, geometry.obstacles, cfg.robot_length, cfg.robot_width,
+            safety_margin=cfg.r_safety + tube + cfg.heading_margin, resolution=0.1, extra_clearance=0.01,
+        )
+    else:
+        inflation = cfg.robot_radius + tube
+        x_lo, x_hi, y_lo, y_hi = geometry.bounds
+        path = astar_initial_path(
+            start_state=start_state, goal_state=goal_state,
+            bounds=(x_lo + inflation, x_hi - inflation, y_lo + inflation, y_hi - inflation),
+            obstacles=geometry.obstacles, inflation_radius=inflation, resolution=0.1, extra_clearance=0.01,
+        )
     return float(np.sum(np.linalg.norm(np.diff(path, axis=0), axis=1)))
 
 
@@ -146,7 +165,7 @@ def plan_for_course(course_path, start_xy, start_yaw, cfg, model=None) -> Plan:
     r_extra = 0.0
 
     try:
-        L = route_length(start, goal, geometry, cfg.robot_radius + constant_tube_radius(60.0, cfg, model))
+        L = route_length(start, goal, geometry, constant_tube_radius(60.0, cfg, model), cfg)
     except (ValueError, RuntimeError) as err:
         raise NoFeasiblePlan(f"no route on {geometry.name}: {err}") from err
     has_ramp = geometry.course.theta > 0.0
@@ -159,9 +178,12 @@ def plan_for_course(course_path, start_xy, start_yaw, cfg, model=None) -> Plan:
         planner_cfg = {
             "N": int(round(T / KNOT_DT)), "T": T, "max_speed": speed_limit, "smoothness_weight": 1.0,
             "robot_length": cfg.robot_length, "robot_width": cfg.robot_width, "r_safety": cfg.r_safety + r_extra,
-            "astar_resolution": 0.1, "astar_clearance": 0.01, "footprint_model": "single_circle",
-            "tube_position_margin_m": tube,
+            "astar_resolution": 0.1, "astar_clearance": 0.01, "footprint_model": cfg.footprint,
+            "tube_position_margin_m": tube + cfg.heading_margin,
         }
+        if cfg.footprint == "three_circle":
+            planner_cfg.update(footprint_yaw_mode="path_tangent", footprint_yaw=float(start_yaw),
+                               footprint_max_yaw_rate=cfg.yaw_ref_rate)
         try:
             with _quiet():
                 result = plan_trajectory(np.r_[start, 0.0, 0.0], np.r_[goal, 0.0, 0.0], geometry, planner_cfg)
@@ -173,10 +195,13 @@ def plan_for_course(course_path, start_xy, start_yaw, cfg, model=None) -> Plan:
             continue
 
         h = result["t"][1] - result["t"][0]
-        yaw = waypoint_yaw_reference(result["x"][:, :2], h, start_yaw, cfg.yaw_ref_rate)
+        if cfg.footprint == "three_circle":     # the yaw the planner used for its own collision checks
+            yaw = np.unwrap(result["yaw_ref"])
+        else:
+            yaw = waypoint_yaw_reference(result["x"][:, :2], h, start_yaw, cfg.yaw_ref_rate)
         reference = PlannerReference(result["t"], result["x"], result["u"], yaw)
         circle = cfg.robot_radius
-        slack = clearance(reference, geometry, circle + tube)
+        slack = clearance(reference, geometry, circle + tube + cfg.heading_margin, circle_offsets=cfg.circle_offsets)
         if slack < 0.0:                         # cut a constraint between samples: replan with more margin
             r_extra += -slack + 0.01
             last = f"cut the inflated constraints by {100 * -slack:.2f} cm between samples"

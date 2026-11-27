@@ -3,6 +3,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from planning.robot_footprint import three_circle_parameters
+
 
 @dataclass(frozen=True)
 class MidLayerConfig:
@@ -18,10 +20,13 @@ class MidLayerConfig:
     dt_qp: float = 0.10             # nominal QP period and prediction step
     horizon: int = 20               # QP stages (2 s)
 
-    # Temporary footprint: one circle around the whole body
+    # Footprint. "three_circle" is the default; "single_circle" is one circle around the whole body, for comparison.
+    footprint: str = "three_circle"
     robot_length: float = 0.7
     robot_width: float = 0.31
-    r_safety: float = 0.10          # included in the 0.483 m circle radius
+    r_safety_three: float = 0.05    # each of the three circles: 0.194 + 0.05 = 0.244 m
+    r_safety_one: float = 0.10      # the one circle: 0.383 + 0.10 = 0.483 m
+    eps_yaw: float = 0.10           # [rad] yaw-tracking allowance; placeholder until task 2.5 measures it
 
     # Limits
     v_max: float = 0.5              # [m/s] nominal speed
@@ -46,11 +51,28 @@ class MidLayerConfig:
     conversion: str = "lag_inverse" # "lag_inverse" or "b3" (v_cmd = v_meas + dt * a_cmd)
 
     use_qp: bool = True             # False: the nominal is the planner reference and only LQR acts
+    qp_start: str = "carried"       # "carried": it starts at the carried nominal. "measured": each solve starts at x_meas
+                                    # (built, but failed J9's "no worse than carried" check on pushed runs)
+
+    # Measured-start QP penalties, l s + q s^2. l_body > l_tube + 2 q_tube r_tube makes it use the tube margin first.
+    l_tube: float = 1e4
+    q_tube: float = 1e2
+    l_body: float = 1e5
+    q_body: float = 1e3
+    l_speed: float = 1e3
+    q_speed: float = 1e2
+
     goal_tol: float = 0.10          # [m]
 
     def __post_init__(self):
         if self.conversion not in ("lag_inverse", "b3"):
             raise ValueError("conversion must be 'lag_inverse' or 'b3'")
+        if self.footprint not in ("three_circle", "single_circle"):
+            raise ValueError("footprint must be 'three_circle' or 'single_circle'")
+        if self.qp_start not in ("measured", "carried"):
+            raise ValueError("qp_start must be 'measured' or 'carried'")
+        if self.eps_yaw < 0.0:
+            raise ValueError("eps_yaw must be nonnegative")
         if not 0.0 <= self.mu_lo <= self.mu_plan:
             raise ValueError("need 0 <= mu_lo <= mu_plan")
         if self.delta < 0.0 or self.delta >= self.mu_plan:
@@ -68,8 +90,27 @@ class MidLayerConfig:
         return self.dt_fb / (1.0 - np.exp(-self.dt_fb / tau))
 
     @property
+    def r_safety(self) -> float:
+        return self.r_safety_three if self.footprint == "three_circle" else self.r_safety_one
+
+    @property
+    def circle_offsets(self) -> np.ndarray:
+        """Circle centers along the body axis [m]."""
+        if self.footprint == "single_circle":
+            return np.zeros(1)
+        return three_circle_parameters(self.robot_length, self.robot_width)[0]
+
+    @property
     def robot_radius(self) -> float:
-        return float(np.hypot(self.robot_length / 2, self.robot_width / 2) + self.r_safety)
+        """Radius of each footprint circle, including r_safety [m]."""
+        if self.footprint == "single_circle":
+            return float(np.hypot(self.robot_length / 2, self.robot_width / 2) + self.r_safety)
+        return three_circle_parameters(self.robot_length, self.robot_width, self.r_safety)[1]
+
+    @property
+    def heading_margin(self) -> float:
+        """Largest sideways shift of a circle center from a yaw error of eps_yaw [m]."""
+        return float(np.max(np.abs(self.circle_offsets)) * self.eps_yaw)
 
     @property
     def accel_limit(self) -> float:

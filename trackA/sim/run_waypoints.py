@@ -258,7 +258,9 @@ def run(course_path: str, path_kind: str = "straight", v_ref: float = 0.4, timeo
         waypoints = make_waypoints(path_kind, start, goal)
         follower = PathFollower(waypoints, v_ref=v_ref)
     else:
+        build_lock.close()          # planning can take minutes and needs no shared files
         follower = follower_factory(spawn_xy.copy(), float(env.base_ori_euler_xyz[2]))
+        build_lock = acquire_build_lock()
         waypoints = np.asarray(follower.waypoints, dtype=float)
     course = Course(course_cfg["course"])   # surface height z(x), so the path is drawn on ramps too
     path_geom_ids = {}
